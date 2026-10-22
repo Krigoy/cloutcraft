@@ -35,6 +35,11 @@ export const ExperimentSchema = z.object({
 });
 
 export const CoachReportSchema = z.object({
+  answer: z
+    .string()
+    .describe(
+      "Direct reply to the creator's question or goal (creatorNotes), 3–6 sentences, using the report's numbers: where they are now, the gap, what the current trajectory implies, and the honest verdict. Empty string when no question or goal was given.",
+    ),
   summary: z.string().describe("Two or three sentences on where this creator stands."),
   strengths: z.array(z.string()).describe("What is already working, with numbers."),
   recommendations: z.array(RecommendationSchema),

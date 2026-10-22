@@ -51,7 +51,7 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),
-  COACH_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
+  COACH_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
   COACH_MAX_TOKENS: z.coerce.number().int().positive().default(16000),
 
   GEMINI_API_KEY: z.string().optional(),

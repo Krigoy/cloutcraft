@@ -1,6 +1,7 @@
 import "server-only";
 import type { ChannelSnapshot, Platform } from "@/lib/platforms/types";
 import type { InsightReport } from "@/lib/insights/analyze";
+import { followerMilestones } from "./coach-math";
 import { completeJson, providerChain, ProviderError, type CoachProvider } from "./providers";
 import { CoachReportSchema, type CoachReport } from "./schema";
 
@@ -44,6 +45,9 @@ Rules:
 - Use the creator's own titles when they illustrate a pattern.
 - Small samples (under ~8 items) support hypotheses, not conclusions. Route those into "experiments" rather than firm recommendations.
 - Be direct and specific. No filler, no motivational language.
+- If "creatorNotes" contains a question or a goal (e.g. "how do I reach 1M subscribers"), that is the brief. Answer it first in "answer": size the goal against the report (current followers per platform, the window's growth, items per week), state the gap and what the present trajectory implies in months or years, and give an honest verdict — including when the goal is unrealistic on the current pace. Then make every recommendation a step toward that goal, in order of leverage. Never answer with generic advice that ignores the creator's numbers.
+- For any follower/subscriber timeline, use the precomputed "followerMilestones" (months to each milestone at 2%, 5% and 10% monthly growth) and say which rate the creator's recent growth resembles. Do not do compounding arithmetic yourself.
+- If "creatorNotes" is absent, set "answer" to an empty string.
 - Respond with a single JSON object that matches the provided schema exactly.`;
 
 /** Trim the report to what the model needs so the prompt stays compact. */
@@ -63,6 +67,7 @@ export function buildCoachPayload(input: CoachInput): unknown {
       subs: s.subs,
       bitsInWindow: s.bitsInWindow,
       reportedRevenueUsdInWindow: s.reportedRevenueUsdInWindow,
+      followerMilestones: followerMilestones(s.followers ?? 0),
     })),
     totals: {
       items: r.totals.items,
@@ -110,7 +115,7 @@ export function buildCoachPayload(input: CoachInput): unknown {
       daysSinceLast: round(c.daysSinceLast, 1),
     })),
     timing: r.timing
-      .filter((t) => t.count >= 2)
+      .filter((t) => t.count >= 3)
       .map((t) => ({
         platform: t.platform,
         kind: t.kind,
@@ -119,7 +124,7 @@ export function buildCoachPayload(input: CoachInput): unknown {
         medianViews: Math.round(t.medianViews),
         lift: round(t.lift),
       })),
-    durationBuckets: r.durationBuckets.map((d) => ({
+    durationBuckets: r.durationBuckets.filter((d) => d.count >= 2).map((d) => ({
       ...d,
       medianViews: Math.round(d.medianViews),
       medianEarningsMid: money(d.medianEarningsMid),
@@ -136,15 +141,15 @@ export function buildCoachPayload(input: CoachInput): unknown {
       engagementRate: round(s.engagementRate, 4),
       earningsMidUsd: money(s.earningsMid),
     })),
-    underperformers: r.underperformers.map((s) => ({
+    underperformers: r.underperformers.slice(0, 3).map((s) => ({
       platform: s.platform,
       kind: s.kind,
       title: s.title,
-      publishedAt: s.publishedAt.slice(0, 10),
-      durationSec: s.durationSec,
       views: s.views,
       viewsVsBaseline: round(s.viewsVsBaseline),
     })),
+    // `detail` already carries the numbers; the raw metrics object (with
+    // joined title lists) roughly doubles the token count without adding facts.
     findings: r.findings.map((f) => ({
       id: f.id,
       type: f.type,
@@ -152,7 +157,6 @@ export function buildCoachPayload(input: CoachInput): unknown {
       platform: f.platform,
       title: f.title,
       detail: f.detail,
-      metrics: f.metrics,
     })),
     creatorNotes: input.creatorNotes?.trim() || undefined,
   };

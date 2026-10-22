@@ -79,7 +79,10 @@ export default async function CoachPage({ searchParams }: PageWithSearchParams) 
                   Plan from {timeFormat.format(new Date(selected.createdAt))} · {selected.model}
                   {typeof selected.usage?.windowDays === "number" && ` · ${selected.usage.windowDays}-day window`}
                 </p>
-                <CoachReportView report={selected.output} />
+                <CoachReportView
+                  report={selected.output}
+                  question={typeof selected.usage?.creatorNotes === "string" ? selected.usage.creatorNotes : undefined}
+                />
               </div>
             ) : (
               <Card data-reveal className="border-dashed">

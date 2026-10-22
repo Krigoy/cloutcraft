@@ -19,9 +19,23 @@ const PRIORITY_VARIANT: Record<Recommendation["priority"], "default" | "secondar
   low: "outline",
 };
 
-export function CoachReportView({ report }: { report: CoachReport }) {
+export function CoachReportView({ report, question }: { report: CoachReport; question?: string }) {
+  const answer = report.answer?.trim();
   return (
     <div className="space-y-6">
+      {question && (
+        <Card className="border-foreground/20">
+          <CardHeader>
+            <CardDescription>You asked</CardDescription>
+            <CardTitle className="text-base font-medium">“{question}”</CardTitle>
+          </CardHeader>
+          {answer && (
+            <CardContent>
+              <p className="text-sm leading-relaxed">{answer}</p>
+            </CardContent>
+          )}
+        </Card>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>Where you stand</CardTitle>

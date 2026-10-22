@@ -136,10 +136,19 @@ function openAiEndpoint(id: CoachProvider): { url: string; key: string } {
   }
 }
 
-/** gpt-oss on Groq accepts low/medium/high; the Anthropic scale is wider. */
-function groqReasoningEffort(effort: string): "low" | "medium" | "high" {
-  return effort === "low" || effort === "medium" ? effort : "high";
+/**
+ * gpt-oss on Groq accepts low/medium/high. Map one step down from the
+ * Anthropic-style scale: the free tier counts reasoning tokens against an
+ * 8k tokens-per-minute budget, and "high" alone can spend ~9k on this task.
+ */
+function groqReasoningEffort(effort: string): "low" | "medium" {
+  return effort === "low" || effort === "medium" ? "low" : "medium";
 }
+
+/** Groq free tier: keep prompt + completion inside the per-minute budget. */
+const GROQ_MAX_TOKENS = 6000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function completeOpenAiCompatible<T>(
   cfg: ProviderConfig,
@@ -157,21 +166,27 @@ async function completeOpenAiCompatible<T>(
       type: "json_schema",
       json_schema: { name: req.schemaName, strict: true, schema: toJsonSchema(req.schema) },
     },
-    max_tokens: e.COACH_MAX_TOKENS,
+    max_tokens: cfg.id === "groq" ? Math.min(e.COACH_MAX_TOKENS, GROQ_MAX_TOKENS) : e.COACH_MAX_TOKENS,
   };
   if (cfg.id === "groq" && /gpt-oss/.test(cfg.model)) body.reasoning_effort = groqReasoningEffort(e.COACH_EFFORT);
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
-  } catch (err) {
-    throw new ProviderError(cfg.id, "network", err instanceof Error ? err.message : "request failed");
+  // One retry on overload / rate-limit: Gemini's free tier returns 503 in bursts.
+  let res: Response | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      });
+    } catch (err) {
+      throw new ProviderError(cfg.id, "network", err instanceof Error ? err.message : "request failed");
+    }
+    if (res.status !== 503 && res.status !== 429) break;
+    if (attempt === 0) await sleep(2000);
   }
+  if (!res) throw new ProviderError(cfg.id, "network", "no response");
 
   const payload = (await res.json().catch(() => ({}))) as OpenAICompatibleResponse;
   if (!res.ok) {

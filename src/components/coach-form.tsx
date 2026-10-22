@@ -37,12 +37,12 @@ export function CoachForm({
     <form action={formAction} className="space-y-3">
       <input type="hidden" name="window" value={windowDays} />
       <div className="space-y-1.5">
-        <Label htmlFor="notes">Anything the coach should know?</Label>
+        <Label htmlFor="notes">Ask the coach a question or set a goal (optional)</Label>
         <Textarea
           id="notes"
           name="notes"
           rows={3}
-          placeholder="Goals, niche, constraints — e.g. “I can film two days a week”, “trying to hit YPP on a second channel”, “audience is mostly in India”."
+          placeholder="e.g. “How do I get to 1M YouTube subscribers?”, “Should I drop Shorts?”, “I can only film two days a week — what matters most?”"
           disabled={pending}
         />
       </div>
