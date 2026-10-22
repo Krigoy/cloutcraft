@@ -1,4 +1,4 @@
-# Creator Earnings
+# CloutCraft
 
 A self-hosted dashboard for creators that connects to **YouTube, Twitch and TikTok**, estimates what each video, Short and live stream earned, tracks how views grow over time, and uses an LLM (free Gemini/Groq tiers, Claude, or a local Ollama model) to turn the numbers into a concrete growth plan.
 
@@ -111,3 +111,7 @@ Single-workspace today: `src/lib/session.ts` is the one place to plug in real si
 - YouTube Super Chat attribution via `superChatEvents.list` matched to stream windows.
 - Twitch EventSub instead of polling; YouTube live polling via `liveBroadcasts`.
 - Multi-user sign-in and per-user timezones for the timing analysis.
+
+## License
+
+[MIT](LICENSE) © 2026 Krishna Goyal

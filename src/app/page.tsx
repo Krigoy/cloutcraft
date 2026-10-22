@@ -4,7 +4,7 @@ import { listConnections } from "@/lib/db/repo";
 import { getWorkspaceId } from "@/lib/session";
 
 export const metadata: Metadata = {
-  title: "Creator Earnings — know what every video, Short and stream earns",
+  title: "CloutCraft — know what every video, Short and stream earns",
   description:
     "A self-hosted dashboard for YouTube, Twitch and TikTok creators: honest earnings ranges, view velocity, deterministic insights and an AI growth coach.",
 };

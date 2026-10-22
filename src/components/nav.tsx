@@ -9,7 +9,7 @@ export function Nav() {
         <div className="flex min-w-0 flex-1 items-center gap-4 sm:gap-6">
           <Link href="/" className="flex shrink-0 items-center gap-2 font-semibold tracking-tight">
             <span aria-hidden className="inline-block size-2.5 rounded-full bg-foreground" />
-            <span className="hidden sm:inline">Creator Earnings</span>
+            <span className="hidden sm:inline">CloutCraft</span>
           </Link>
           <div className="min-w-0 flex-1">
             <NavLinks />

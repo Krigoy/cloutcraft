@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "Creator Earnings", template: "%s · Creator Earnings" },
+  title: { default: "CloutCraft", template: "%s · CloutCraft" },
   description: "Estimated earnings and growth insights across YouTube, Twitch and TikTok.",
 };
 
