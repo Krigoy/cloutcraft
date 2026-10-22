@@ -1,4 +1,6 @@
 import "server-only";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
 /**
@@ -33,8 +35,13 @@ const schema = z.object({
     .min(32, "APP_ENCRYPTION_KEY must be at least 32 characters (use `openssl rand -hex 32`)"),
   /** Postgres connection string (Supabase: the session pooler URL, *.pooler.supabase.com:5432). */
   DATABASE_URL: z.preprocess((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined), z.string().url().optional()),
-  /** Embedded Postgres directory used when DATABASE_URL is unset (local dev only); ":memory:" for tests. */
-  PGLITE_PATH: z.string().default("./data/pglite"),
+  /**
+   * Embedded Postgres directory used when DATABASE_URL is unset (local dev
+   * only); ":memory:" for tests. Lives outside the project on purpose: the
+   * dev server hot-reloads on any file change under the project root, and a
+   * database writing WAL files there would reload the page on every query.
+   */
+  PGLITE_PATH: z.string().default(join(homedir(), ".cloutcraft", "pglite")),
 
   /* --- AI coach --- */
   /** Which provider answers first; "auto" = first configured in the order gemini, groq, anthropic, ollama. */

@@ -25,7 +25,7 @@ npm run setup          # writes .env.local with a fresh encryption key + cron se
 npm run dev            # http://localhost:3000 → sign up → Settings → “Install demo channels”
 ```
 
-Locally the database is an embedded Postgres in `./data/pglite`, so no database setup is needed; set `DATABASE_URL` to use Supabase instead.
+Locally the database is an embedded Postgres stored in `~/.cloutcraft/pglite` (outside the repo, so `next dev`'s file watcher never reacts to its writes); set `DATABASE_URL` to use Supabase instead.
 
 Optional, in a second terminal:
 
@@ -99,7 +99,7 @@ src/lib/insights/    analyze.ts (pure statistics → InsightReport with findings
 src/lib/ai/          coach.ts (provider chain + validation) · providers.ts (Gemini/Groq/Ollama via OpenAI-compatible API, Anthropic SDK) · schema.ts (zod)
 src/lib/sync.ts      token refresh → adapter.sync → store snapshot, items, metric history
 src/lib/scheduler.ts tick(): live sampling + periodic full sync
-src/lib/db/          Postgres (Supabase via postgres.js, or embedded PGlite locally) · schema.ts · repo.ts
+src/lib/db/          Postgres (Supabase via postgres.js, or embedded PGlite in ~/.cloutcraft locally) · schema.ts · repo.ts
 src/lib/session.ts   Clerk user id → workspace id
 src/proxy.ts         Clerk auth gate (Next 16 proxy)
 src/app/             overview · content · coach · settings · API routes (auth, sync, demo, cron)
