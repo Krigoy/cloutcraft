@@ -33,7 +33,7 @@ async function freshTokens(
 ): Promise<OAuthTokens> {
   if (!isExpired(conn.tokens.expiresAt)) return conn.tokens;
   const refreshed = await getAdapter(conn.platform).refresh(conn.tokens);
-  repo.updateConnectionTokens(workspaceId, conn.platform, refreshed);
+  await repo.updateConnectionTokens(workspaceId, conn.platform, refreshed);
   return refreshed;
 }
 
@@ -53,8 +53,8 @@ function demoSync(platform: Platform): SyncResult {
  * while the stream was live, and synthesise entries for streams whose VOD
  * was never published (or has already expired).
  */
-function enrichTwitchWithLiveStats(workspaceId: string, items: ContentItem[]): ContentItem[] {
-  const stats = repo.liveStatsByStream(workspaceId, "twitch");
+async function enrichTwitchWithLiveStats(workspaceId: string, items: ContentItem[]): Promise<ContentItem[]> {
+  const stats = await repo.liveStatsByStream(workspaceId, "twitch");
   if (stats.size === 0) return items;
   const { LIVE_MIN_SAMPLES: minSamples, LIVE_ENDED_MINUTES: endedMinutes } = env();
 
@@ -68,7 +68,7 @@ function enrichTwitchWithLiveStats(workspaceId: string, items: ContentItem[]): C
   }
 
   // A VOD now exists for streams we previously synthesised: drop the stand-ins.
-  repo.deleteContentItems(
+  await repo.deleteContentItems(
     workspaceId,
     [...matched].map((id) => `twitch:stream-${id}`),
   );
@@ -98,7 +98,7 @@ function enrichTwitchWithLiveStats(workspaceId: string, items: ContentItem[]): C
 }
 
 export async function syncPlatform(workspaceId: string, platform: Platform): Promise<PlatformSyncResult> {
-  const conn = repo.getConnection(workspaceId, platform);
+  const conn = await repo.getConnection(workspaceId, platform);
   if (!conn) return { platform, ok: false, items: 0, warnings: [], error: "Not connected" };
 
   try {
@@ -114,28 +114,28 @@ export async function syncPlatform(workspaceId: string, platform: Platform): Pro
     }
 
     let items = result.items;
-    if (platform === "twitch" && !conn.isDemo) items = enrichTwitchWithLiveStats(workspaceId, items);
+    if (platform === "twitch" && !conn.isDemo) items = await enrichTwitchWithLiveStats(workspaceId, items);
 
     const capturedAt = new Date().toISOString();
-    repo.saveSnapshot(workspaceId, result.channel);
-    repo.upsertContentItems(workspaceId, items);
-    repo.recordMetrics(workspaceId, items, capturedAt);
-    repo.updateConnectionProfile(workspaceId, platform, {
+    await repo.saveSnapshot(workspaceId, result.channel);
+    await repo.upsertContentItems(workspaceId, items);
+    await repo.recordMetrics(workspaceId, items, capturedAt);
+    await repo.updateConnectionProfile(workspaceId, platform, {
       displayName: result.channel.displayName,
       handle: result.channel.handle,
       avatarUrl: result.channel.avatarUrl,
     });
-    repo.markSynced(workspaceId, platform, null);
+    await repo.markSynced(workspaceId, platform, null);
     return { platform, ok: true, items: items.length, warnings: result.warnings };
   } catch (err) {
     const message = describeError(err);
-    repo.markSynced(workspaceId, platform, message);
+    await repo.markSynced(workspaceId, platform, message);
     return { platform, ok: false, items: 0, warnings: [], error: message };
   }
 }
 
 export async function syncAll(workspaceId: string): Promise<PlatformSyncResult[]> {
-  const connections = repo.listConnections(workspaceId);
+  const connections = await repo.listConnections(workspaceId);
   return Promise.all(connections.map((c) => syncPlatform(workspaceId, c.platform)));
 }
 
@@ -148,16 +148,16 @@ export interface LivePollResult {
 /** Record one viewer-count sample for every connected channel that is live right now. */
 export async function pollLiveAll(workspaceId: string): Promise<LivePollResult[]> {
   const results: LivePollResult[] = [];
-  for (const summary of repo.listConnections(workspaceId)) {
+  for (const summary of await repo.listConnections(workspaceId)) {
     if (summary.isDemo) continue;
     const adapter = getAdapter(summary.platform);
     if (!adapter.pollLive) continue;
-    const conn = repo.getConnection(workspaceId, summary.platform);
+    const conn = await repo.getConnection(workspaceId, summary.platform);
     if (!conn) continue;
     try {
       const tokens = await freshTokens(workspaceId, conn);
       const sample = await adapter.pollLive(tokens);
-      if (sample) repo.recordLiveSample(workspaceId, sample);
+      if (sample) await repo.recordLiveSample(workspaceId, sample);
       results.push({ platform: summary.platform, sample });
     } catch (err) {
       results.push({ platform: summary.platform, sample: null, error: describeError(err) });

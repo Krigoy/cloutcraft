@@ -1,0 +1,165 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import type { ContentItem } from "@/lib/platforms/types";
+
+/*
+ * Runs the real repository SQL against an in-memory Postgres (PGlite), the
+ * same engine used for local development. Covers the queries that differ
+ * most from the original SQLite version: bulk upserts, DISTINCT ON reads,
+ * workspace isolation and single-use OAuth state.
+ */
+
+process.env.APP_ENCRYPTION_KEY = "test-key-0123456789abcdef0123456789abcdef";
+process.env.PGLITE_PATH = ":memory:";
+delete process.env.DATABASE_URL;
+
+type Repo = typeof import("./repo");
+let repo: Repo;
+
+const A = "user_alice";
+const B = "user_bob";
+
+function item(id: string, views: number, publishedAt = "2026-10-01T00:00:00.000Z"): ContentItem {
+  return {
+    id: `youtube:${id}`,
+    platform: "youtube",
+    externalId: id,
+    kind: "video",
+    title: `Video ${id}`,
+    url: `https://www.youtube.com/watch?v=${id}`,
+    publishedAt,
+    durationSec: 600,
+    views,
+  };
+}
+
+beforeAll(async () => {
+  repo = await import("./repo");
+});
+
+describe("connections", () => {
+  it("encrypts tokens, upserts, and isolates workspaces", async () => {
+    await repo.upsertConnection(A, "youtube", { tokens: { accessToken: "secret-a", scopes: ["s1"] }, displayName: "Alice" });
+    await repo.upsertConnection(B, "youtube", { tokens: { accessToken: "secret-b", scopes: [] }, isDemo: true });
+    // Upsert keeps the display name when the new value is missing.
+    await repo.upsertConnection(A, "youtube", { tokens: { accessToken: "secret-a2", scopes: ["s1", "s2"] } });
+
+    const [a] = await repo.listConnections(A);
+    expect(a.displayName).toBe("Alice");
+    expect(a.scopes).toEqual(["s1", "s2"]);
+    expect(a.isDemo).toBe(false);
+    expect((await repo.getConnection(A, "youtube"))?.tokens.accessToken).toBe("secret-a2");
+    expect((await repo.listConnections(B))[0].isDemo).toBe(true);
+    expect(await repo.listWorkspacesWithConnections()).toEqual([A, B]);
+  });
+
+  it("records sync status", async () => {
+    await repo.markSynced(A, "youtube", "boom");
+    expect((await repo.listConnections(A))[0].lastSyncError).toBe("boom");
+    await repo.markSynced(A, "youtube", null);
+    const [a] = await repo.listConnections(A);
+    expect(a.lastSyncError).toBeNull();
+    expect(a.lastSyncedAt).toBeTruthy();
+  });
+});
+
+describe("content and metrics", () => {
+  it("bulk-upserts items per workspace without cross-talk", async () => {
+    await repo.upsertContentItems(A, [item("v1", 100), item("v2", 200, "2026-10-05T00:00:00.000Z")]);
+    await repo.upsertContentItems(B, [item("v1", 999)]); // same id, other user
+    await repo.upsertContentItems(A, [item("v1", 150)]); // update
+
+    const a = await repo.listContentItems(A);
+    expect(a.map((i) => [i.externalId, i.views])).toEqual([
+      ["v2", 200],
+      ["v1", 150],
+    ]);
+    expect((await repo.listContentItems(B)).map((i) => i.views)).toEqual([999]);
+    expect(await repo.listContentItems(A, { sinceIso: "2026-10-03T00:00:00.000Z" })).toHaveLength(1);
+  });
+
+  it("returns the latest view count at or before a cutoff", async () => {
+    await repo.recordMetrics(A, [item("v1", 100), item("v2", 50)], "2026-10-10T00:00:00.000Z");
+    await repo.recordMetrics(A, [item("v1", 140)], "2026-10-11T00:00:00.000Z");
+    await repo.recordMetrics(A, [item("v1", 3_000_000_000)], "2026-10-12T00:00:00.000Z"); // > int32
+    await repo.recordMetrics(B, [item("v1", 7)], "2026-10-11T00:00:00.000Z");
+
+    const asOf11 = await repo.viewsAsOf(A, "2026-10-11T12:00:00.000Z");
+    expect(asOf11.get("youtube:v1")).toBe(140);
+    expect(asOf11.get("youtube:v2")).toBe(50);
+    expect((await repo.viewsAsOf(A, "2026-10-13T00:00:00.000Z")).get("youtube:v1")).toBe(3_000_000_000);
+    expect((await repo.viewsAsOf(B, "2026-10-13T00:00:00.000Z")).get("youtube:v1")).toBe(7);
+  });
+
+  it("deletes items and their metric history", async () => {
+    await repo.deleteContentItems(A, ["youtube:v2"]);
+    expect((await repo.listContentItems(A)).map((i) => i.externalId)).toEqual(["v1"]);
+    expect((await repo.viewsAsOf(A, "2026-10-13T00:00:00.000Z")).has("youtube:v2")).toBe(false);
+  });
+});
+
+describe("snapshots, live samples and OAuth state", () => {
+  it("returns the newest snapshot per platform", async () => {
+    const base = { displayName: "x", windowDays: 90 } as const;
+    await repo.saveSnapshot(A, { ...base, platform: "youtube", capturedAt: "2026-10-01T00:00:00Z", followers: 1 });
+    await repo.saveSnapshot(A, { ...base, platform: "youtube", capturedAt: "2026-10-02T00:00:00Z", followers: 2 });
+    await repo.saveSnapshot(A, { ...base, platform: "twitch", capturedAt: "2026-10-01T00:00:00Z", followers: 9 });
+    const snaps = await repo.latestSnapshots(A);
+    expect(snaps.youtube?.followers).toBe(2);
+    expect(snaps.twitch?.followers).toBe(9);
+  });
+
+  it("aggregates live samples per stream", async () => {
+    const now = Date.now();
+    for (const [i, viewers] of [100, 200, 300].entries()) {
+      await repo.recordLiveSample(A, {
+        platform: "twitch",
+        streamId: "s1",
+        capturedAt: new Date(now - (2 - i) * 60_000).toISOString(),
+        viewerCount: viewers,
+        title: "Live",
+      });
+    }
+    const stats = (await repo.liveStatsByStream(A, "twitch")).get("s1")!;
+    expect(stats).toMatchObject({ samples: 3, avgViewers: 200, peakViewers: 300 });
+    const live = await repo.currentlyLive(A, 5);
+    expect(live).toHaveLength(1);
+    expect(live[0].viewerCount).toBe(300);
+    expect(await repo.currentlyLive(B, 5)).toHaveLength(0);
+  });
+
+  it("consumes OAuth state exactly once", async () => {
+    await repo.createOAuthState(A, "twitch", "state-123", "verifier");
+    expect(await repo.consumeOAuthState("state-123")).toEqual({
+      workspaceId: A,
+      platform: "twitch",
+      codeVerifier: "verifier",
+    });
+    expect(await repo.consumeOAuthState("state-123")).toBeNull();
+  });
+});
+
+describe("rates, coach runs and cleanup", () => {
+  it("applies rate override changes transactionally", async () => {
+    await repo.setRateOverrides(A, { "youtube.video.rpm.mid": 4, "tiktok.video.rpm.mid": 1 });
+    await repo.setRateOverrides(A, { "tiktok.video.rpm.mid": null });
+    expect(await repo.getRateOverrides(A)).toEqual({ "youtube.video.rpm.mid": 4 });
+    await repo.clearRateOverrides(A);
+    expect(await repo.getRateOverrides(A)).toEqual({});
+  });
+
+  it("stores coach runs and returns their ids", async () => {
+    const id = await repo.saveCoachRun(A, { model: "gemini/x", input: { a: 1 }, output: { summary: "s" } });
+    const runs = await repo.listCoachRuns<{ summary: string }>(A);
+    expect(runs[0]).toMatchObject({ id, model: "gemini/x", output: { summary: "s" } });
+    expect(await repo.listCoachRuns(B)).toHaveLength(0);
+  });
+
+  it("removes a connection and everything synced for it", async () => {
+    await repo.deleteConnection(A, "youtube");
+    expect(await repo.listConnections(A)).toHaveLength(0);
+    expect(await repo.listContentItems(A)).toHaveLength(0);
+    expect((await repo.viewsAsOf(A, "2026-12-31T00:00:00.000Z")).size).toBe(0);
+    // Bob is untouched.
+    expect(await repo.listContentItems(B)).toHaveLength(1);
+  });
+});

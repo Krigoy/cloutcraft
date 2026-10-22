@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { IntroPage } from "@/components/intro/intro-page";
 import { listConnections } from "@/lib/db/repo";
-import { getWorkspaceId } from "@/lib/session";
+import { getOptionalWorkspaceId } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "CloutCraft — know what every video, Short and stream earns",
@@ -11,9 +11,12 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const connections = listConnections(await getWorkspaceId());
+  // Public page: signed-out visitors see the generic calls to action.
+  const workspaceId = await getOptionalWorkspaceId();
+  const connections = workspaceId ? await listConnections(workspaceId) : [];
   return (
     <IntroPage
+      signedIn={workspaceId !== null}
       hasConnections={connections.some((c) => !c.isDemo)}
       demoInstalled={connections.some((c) => c.isDemo)}
     />

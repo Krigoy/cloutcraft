@@ -29,7 +29,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ plat
   const workspaceId = await getWorkspaceId();
   const state = randomToken(24);
   const pkce = adapter.usesPkce ? createPkcePair() : undefined;
-  createOAuthState(workspaceId, platform, state, pkce?.verifier);
+  await createOAuthState(workspaceId, platform, state, pkce?.verifier);
 
   // Must match the URI registered with the platform; set APP_URL to pin it.
   const redirectUri = new URL(`/api/auth/${platform}/callback`, base).toString();

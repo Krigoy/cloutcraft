@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   const action = String(form.get("action") ?? "install");
   const workspaceId = await getWorkspaceId();
 
-  if (action === "remove") removeDemo(workspaceId);
+  if (action === "remove") await removeDemo(workspaceId);
   else await installDemo(workspaceId);
 
   revalidatePath("/", "layout");

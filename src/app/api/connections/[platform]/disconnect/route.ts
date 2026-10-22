@@ -14,7 +14,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pla
 
   const { platform } = await params;
   if (isPlatform(platform)) {
-    deleteConnection(await getWorkspaceId(), platform);
+    await deleteConnection(await getWorkspaceId(), platform);
     revalidatePath("/", "layout");
   }
   return NextResponse.redirect(new URL("/settings?disconnected=1", appOrigin(request)), 303);

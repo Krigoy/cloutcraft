@@ -14,7 +14,7 @@ export async function installDemo(workspaceId: string): Promise<void> {
 
   for (const platform of PLATFORMS) {
     const snapshot = data.snapshots.find((s) => s.platform === platform)!;
-    repo.upsertConnection(workspaceId, platform, {
+    await repo.upsertConnection(workspaceId, platform, {
       tokens: { accessToken: "demo", scopes: [] },
       displayName: snapshot.displayName,
       handle: snapshot.handle,
@@ -29,7 +29,7 @@ export async function installDemo(workspaceId: string): Promise<void> {
       const views = backdatedViews(item, daysBack, now);
       return views === null ? [] : [{ ...item, views }];
     });
-    repo.recordMetrics(workspaceId, historical, capturedAt);
+    await repo.recordMetrics(workspaceId, historical, capturedAt);
   }
 
   for (const platform of PLATFORMS) {
@@ -37,16 +37,16 @@ export async function installDemo(workspaceId: string): Promise<void> {
   }
 }
 
-export function removeDemo(workspaceId: string): Platform[] {
+export async function removeDemo(workspaceId: string): Promise<Platform[]> {
   const removed: Platform[] = [];
-  for (const conn of repo.listConnections(workspaceId)) {
+  for (const conn of await repo.listConnections(workspaceId)) {
     if (!conn.isDemo) continue;
-    repo.deleteConnection(workspaceId, conn.platform);
+    await repo.deleteConnection(workspaceId, conn.platform);
     removed.push(conn.platform);
   }
   return removed;
 }
 
-export function hasDemo(workspaceId: string): boolean {
-  return repo.listConnections(workspaceId).some((c) => c.isDemo);
+export async function hasDemo(workspaceId: string): Promise<boolean> {
+  return (await repo.listConnections(workspaceId)).some((c) => c.isDemo);
 }

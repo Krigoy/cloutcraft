@@ -61,7 +61,15 @@ const COUNTERS = [
   { value: 1, label: "plan that cites its evidence" },
 ] as const;
 
-export function IntroPage({ hasConnections, demoInstalled }: { hasConnections: boolean; demoInstalled: boolean }) {
+export function IntroPage({
+  signedIn,
+  hasConnections,
+  demoInstalled,
+}: {
+  signedIn: boolean;
+  hasConnections: boolean;
+  demoInstalled: boolean;
+}) {
   const root = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -181,7 +189,12 @@ export function IntroPage({ hasConnections, demoInstalled }: { hasConnections: b
     return () => scope.revert();
   }, []);
 
-  const primaryHref = hasConnections ? "/dashboard" : "/settings";
+  // Signed out → sign up. Signed in → straight to the data, or to connecting it.
+  const primary = !signedIn
+    ? { href: "/sign-up", label: "Get started free" }
+    : hasConnections
+      ? { href: "/dashboard", label: "Open the dashboard" }
+      : { href: "/settings", label: "Connect a platform" };
 
   return (
     <div ref={root} className="intro -mt-6 space-y-28 pb-24">
@@ -211,11 +224,19 @@ export function IntroPage({ hasConnections, demoInstalled }: { hasConnections: b
             from="0.4em"
           />
           <div className="intro-cta mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Link href={primaryHref} className={cn(buttonVariants({ size: "lg" }), "gap-2")}>
-              {hasConnections ? "Open the dashboard" : "Connect a platform"}
+            <Link href={primary.href} className={cn(buttonVariants({ size: "lg" }), "gap-2")}>
+              {primary.label}
               <ArrowRight className="size-4" />
             </Link>
-            {!demoInstalled && (
+            {!signedIn ? (
+              <Link href="/sign-in" className={buttonVariants({ variant: "outline", size: "lg" })}>
+                Sign in
+              </Link>
+            ) : demoInstalled ? (
+              <Link href="/dashboard" className={buttonVariants({ variant: "outline", size: "lg" })}>
+                View the demo
+              </Link>
+            ) : (
               <form action="/api/demo" method="post">
                 <input type="hidden" name="action" value="install" />
                 <Button type="submit" variant="outline" size="lg">
@@ -223,11 +244,6 @@ export function IntroPage({ hasConnections, demoInstalled }: { hasConnections: b
                 </Button>
               </form>
             )}
-            {demoInstalled && !hasConnections ? null : demoInstalled ? (
-              <Link href="/dashboard" className={buttonVariants({ variant: "outline", size: "lg" })}>
-                View the demo
-              </Link>
-            ) : null}
           </div>
           <div className="intro-hint mt-16 flex flex-col items-center gap-1 text-xs text-muted-foreground">
             <span>Scroll</span>
@@ -400,8 +416,8 @@ export function IntroPage({ hasConnections, demoInstalled }: { hasConnections: b
           Self-hosted, read-only access, tokens encrypted at rest. The only thing sent to an AI is a summary of your analytics — never a credential.
         </p>
         <div data-scroll-reveal className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Link href={primaryHref} className={cn(buttonVariants({ variant: "secondary", size: "lg" }), "gap-2")}>
-            {hasConnections ? "Open the dashboard" : "Get started"}
+          <Link href={primary.href} className={cn(buttonVariants({ variant: "secondary", size: "lg" }), "gap-2")}>
+            {primary.label}
             <ArrowRight className="size-4" />
           </Link>
           <Link href="/settings" className={cn(buttonVariants({ variant: "ghost", size: "lg" }), "text-background hover:bg-background/10 hover:text-background")}>

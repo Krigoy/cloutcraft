@@ -1,127 +1,107 @@
 import "server-only";
-import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { env } from "@/lib/env";
+import type { ParameterOrJSON, Sql, TransactionSql } from "postgres";
+import { SCHEMA_SQL } from "./schema";
 
 /**
- * SQLite connection singleton. Stored on globalThis so Next's dev-server HMR
- * does not open a new handle on every module reload.
+ * Postgres access.
+ *
+ *  - Production / Supabase: `DATABASE_URL` → postgres.js. Use Supabase's
+ *    **session** pooler (`*.pooler.supabase.com:5432`): it is IPv4 (Vercel
+ *    can't reach the IPv6-only direct host) and keeps a real connection per
+ *    client. The transaction pooler (:6543) intermittently drops a query
+ *    when postgres.js reuses a connection right after a transaction, which
+ *    left pages loading forever. Prepared statements stay disabled so the
+ *    URL can still point at :6543 without "prepared statement" errors.
+ *  - Local development without `DATABASE_URL`: an embedded Postgres (PGlite)
+ *    persisted under `PGLITE_PATH`, so `npm run dev` needs no setup.
+ *
+ * Both are wrapped in one tiny interface with `$1`-style parameters. The
+ * schema is applied idempotently once per process.
  */
-declare global {
-  var __influencerDb: Database.Database | undefined;
+
+export type Row = Record<string, unknown>;
+
+export interface Queryable {
+  query<T extends Row = Row>(text: string, params?: unknown[]): Promise<T[]>;
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS connections (
-  id INTEGER PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  platform TEXT NOT NULL,
-  tokens_enc TEXT NOT NULL,
-  scopes TEXT NOT NULL,
-  display_name TEXT,
-  handle TEXT,
-  avatar_url TEXT,
-  is_demo INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  last_synced_at TEXT,
-  last_sync_error TEXT,
-  UNIQUE (workspace_id, platform)
-);
+export interface Db extends Queryable {
+  transaction<T>(fn: (tx: Queryable) => Promise<T>): Promise<T>;
+}
 
-CREATE TABLE IF NOT EXISTS channel_snapshots (
-  id INTEGER PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  platform TEXT NOT NULL,
-  captured_at TEXT NOT NULL,
-  data TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_snapshots_ws ON channel_snapshots (workspace_id, platform, captured_at);
+declare global {
+  var __cloutcraftDb: Promise<Db> | undefined;
+}
 
-CREATE TABLE IF NOT EXISTS content_items (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  platform TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  published_at TEXT NOT NULL,
-  data TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_content_ws ON content_items (workspace_id, platform, published_at);
+async function connectPostgres(url: string): Promise<Db> {
+  const { default: postgres } = await import("postgres");
+  const sql = postgres(url, {
+    prepare: false,
+    // Small per instance: the session pooler caps total clients, and on
+    // Vercel every warm function instance holds its own pool.
+    max: 3,
+    idle_timeout: 20,
+    connect_timeout: 15,
+    onnotice: () => {},
+  });
+  const wrap = (s: Sql | TransactionSql): Queryable => ({
+    async query<T extends Row>(text: string, params: unknown[] = []) {
+      return (await s.unsafe(text, params as ParameterOrJSON<never>[])) as unknown as T[];
+    },
+  });
+  const base = wrap(sql);
+  return {
+    query: base.query,
+    async transaction<T>(fn: (tx: Queryable) => Promise<T>) {
+      return (await sql.begin((tx) => fn(wrap(tx)))) as T;
+    },
+  };
+}
 
-CREATE TABLE IF NOT EXISTS metric_snapshots (
-  workspace_id TEXT NOT NULL,
-  item_id TEXT NOT NULL,
-  captured_at TEXT NOT NULL,
-  views INTEGER NOT NULL,
-  likes INTEGER,
-  comments INTEGER,
-  shares INTEGER,
-  PRIMARY KEY (item_id, captured_at)
-);
-CREATE INDEX IF NOT EXISTS idx_metrics_ws ON metric_snapshots (workspace_id, captured_at);
-
-CREATE TABLE IF NOT EXISTS live_samples (
-  workspace_id TEXT NOT NULL,
-  platform TEXT NOT NULL,
-  stream_id TEXT NOT NULL,
-  captured_at TEXT NOT NULL,
-  viewer_count INTEGER NOT NULL,
-  title TEXT,
-  started_at TEXT,
-  PRIMARY KEY (workspace_id, platform, stream_id, captured_at)
-);
-
-CREATE TABLE IF NOT EXISTS scheduler_runs (
-  id INTEGER PRIMARY KEY,
-  ran_at TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  summary TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS oauth_states (
-  state TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  platform TEXT NOT NULL,
-  code_verifier TEXT,
-  created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS rate_overrides (
-  workspace_id TEXT NOT NULL,
-  key TEXT NOT NULL,
-  value REAL NOT NULL,
-  PRIMARY KEY (workspace_id, key)
-);
-
-CREATE TABLE IF NOT EXISTS coach_runs (
-  id INTEGER PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  model TEXT NOT NULL,
-  input TEXT NOT NULL,
-  output TEXT NOT NULL,
-  usage TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_coach_ws ON coach_runs (workspace_id, created_at);
-`;
-
-export function db(): Database.Database {
-  if (globalThis.__influencerDb) return globalThis.__influencerDb;
-
-  const configured = env().DATABASE_PATH;
-  let conn: Database.Database;
-  if (configured === ":memory:") {
-    conn = new Database(":memory:");
+async function connectPglite(dir: string): Promise<Db> {
+  const { PGlite } = await import("@electric-sql/pglite");
+  let pg: InstanceType<typeof PGlite>;
+  if (dir === ":memory:") {
+    pg = new PGlite();
   } else {
-    // turbopackIgnore: the path comes from config, not from a bundled asset.
-    const path = resolve(/* turbopackIgnore: true */ process.cwd(), configured);
-    mkdirSync(dirname(path), { recursive: true });
-    conn = new Database(path);
-    conn.pragma("journal_mode = WAL");
+    const path = resolve(/* turbopackIgnore: true */ process.cwd(), dir);
+    mkdirSync(path, { recursive: true });
+    pg = new PGlite(path);
   }
-  conn.pragma("foreign_keys = ON");
-  conn.exec(SCHEMA);
-  globalThis.__influencerDb = conn;
-  return conn;
+  await pg.waitReady;
+  type Tx = Parameters<Parameters<typeof pg.transaction>[0]>[0];
+  const wrap = (q: typeof pg | Tx): Queryable => ({
+    async query<T extends Row>(text: string, params: unknown[] = []) {
+      return (await q.query<T>(text, params)).rows;
+    },
+  });
+  const base = wrap(pg);
+  return {
+    query: base.query,
+    transaction: (fn) => pg.transaction((tx) => fn(wrap(tx))),
+  };
+}
+
+async function init(): Promise<Db> {
+  const e = env();
+  const db = e.DATABASE_URL ? await connectPostgres(e.DATABASE_URL) : await connectPglite(e.PGLITE_PATH);
+  // Serialise concurrent cold starts so CREATE ... IF NOT EXISTS can't race.
+  await db.transaction(async (tx) => {
+    await tx.query("SELECT pg_advisory_xact_lock(72190331)");
+    for (const statement of SCHEMA_SQL) await tx.query(statement);
+  });
+  return db;
+}
+
+export function db(): Promise<Db> {
+  if (!globalThis.__cloutcraftDb) {
+    globalThis.__cloutcraftDb = init().catch((err) => {
+      globalThis.__cloutcraftDb = undefined; // allow a retry on the next request
+      throw err;
+    });
+  }
+  return globalThis.__cloutcraftDb;
 }

@@ -31,7 +31,10 @@ const schema = z.object({
   APP_ENCRYPTION_KEY: z
     .string()
     .min(32, "APP_ENCRYPTION_KEY must be at least 32 characters (use `openssl rand -hex 32`)"),
-  DATABASE_PATH: z.string().default("./data/app.db"),
+  /** Postgres connection string (Supabase: the session pooler URL, *.pooler.supabase.com:5432). */
+  DATABASE_URL: z.preprocess((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined), z.string().url().optional()),
+  /** Embedded Postgres directory used when DATABASE_URL is unset (local dev only); ":memory:" for tests. */
+  PGLITE_PATH: z.string().default("./data/pglite"),
 
   /* --- AI coach --- */
   /** Which provider answers first; "auto" = first configured in the order gemini, groq, anthropic, ollama. */
@@ -45,7 +48,7 @@ const schema = z.object({
   COACH_MAX_TOKENS: z.coerce.number().int().positive().default(16000),
 
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
+  GEMINI_MODEL: z.string().default("gemini-3.8-flash"),
   GROQ_API_KEY: z.string().optional(),
   GROQ_MODEL: z.string().default("openai/gpt-oss-120b"),
   ANTHROPIC_API_KEY: z.string().optional(),

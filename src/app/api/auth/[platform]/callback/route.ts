@@ -3,6 +3,7 @@ import { consumeOAuthState, upsertConnection } from "@/lib/db/repo";
 import { appOrigin } from "@/lib/origin";
 import { getAdapter } from "@/lib/platforms";
 import { isPlatform, PLATFORM_LABEL } from "@/lib/platforms/types";
+import { getOptionalWorkspaceId } from "@/lib/session";
 import { syncPlatform } from "@/lib/sync";
 
 export const dynamic = "force-dynamic";
@@ -27,9 +28,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ plat
   const state = url.searchParams.get("state");
   if (!code || !state) return fail(`${label} returned no authorization code.`);
 
-  const pending = consumeOAuthState(state);
+  const pending = await consumeOAuthState(state);
   if (!pending || pending.platform !== platform) {
     return fail(`${label} authorization state did not match (expired or tampered). Try again.`);
+  }
+  // The account must land in the workspace of whoever is signed in now, and
+  // that must be the user who started the flow (blocks login-CSRF account linking).
+  const currentUser = await getOptionalWorkspaceId();
+  if (currentUser !== pending.workspaceId) {
+    return fail(`${label} authorization was started by a different signed-in user. Try again.`);
   }
 
   try {
@@ -40,7 +47,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ plat
       redirectUri,
       codeVerifier: pending.codeVerifier ?? undefined,
     });
-    upsertConnection(pending.workspaceId, platform, { tokens, isDemo: false });
+    await upsertConnection(pending.workspaceId, platform, { tokens, isDemo: false });
   } catch (err) {
     return fail(`${label} token exchange failed: ${err instanceof Error ? err.message : String(err)}`);
   }

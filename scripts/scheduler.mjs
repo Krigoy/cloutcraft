@@ -36,14 +36,11 @@ async function tick() {
       headers: secret ? { Authorization: `Bearer ${secret}` } : {},
     });
     const body = await res.json().catch(() => ({}));
-    const live = (body.live ?? [])
-      .map((l) => `${l.platform}=${l.sample ? `${l.sample.viewerCount} viewers` : l.error ? `error` : "offline"}`)
-      .join(", ");
-    const synced = (body.synced ?? []).map((s) => `${s.platform}:${s.ok ? `${s.items} items` : `FAILED ${s.error}`}`).join(", ");
     console.log(
       `[${new Date().toISOString()}] ${res.status} in ${Date.now() - started}ms` +
-        (live ? ` | live: ${live}` : "") +
-        (synced ? ` | synced: ${synced}` : "") +
+        (res.ok
+          ? ` | workspaces ${body.workspaces ?? 0} · live ${body.live ?? 0} · synced ${body.synced ?? 0} · failed ${body.failed ?? 0}`
+          : "") +
         (res.status === 401 ? " | set CRON_SECRET to match the server" : ""),
     );
   } catch (err) {

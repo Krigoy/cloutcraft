@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Coach" };
 export const dynamic = "force-dynamic";
+// Generating a plan takes 20–60 s; this also applies to the page's server action.
+export const maxDuration = 60;
 
 const timeFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" });
 
@@ -24,7 +26,7 @@ export default async function CoachPage({ searchParams }: PageWithSearchParams) 
   const params = await searchParams;
   const windowDays = parseWindow(params.window);
   const data = await loadDashboard(windowDays);
-  const runs = listCoachRuns<CoachReport>(data.workspaceId, 12);
+  const runs = await listCoachRuns<CoachReport>(data.workspaceId, 12);
   const requested = Number(Array.isArray(params.run) ? params.run[0] : params.run);
   const selected = runs.find((r) => r.id === requested) ?? runs[0];
   const availability = coachAvailability();

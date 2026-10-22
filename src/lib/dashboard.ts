@@ -61,12 +61,12 @@ export interface DashboardData {
   lastTick: { ranAt: string; kind: string } | null;
 }
 
-function viewDeltas(
+async function viewDeltas(
   workspaceId: string,
   items: EstimatedItem[],
   cutoff: Date,
-): ViewDeltas {
-  const asOf = repo.viewsAsOf(workspaceId, cutoff.toISOString());
+): Promise<ViewDeltas> {
+  const asOf = await repo.viewsAsOf(workspaceId, cutoff.toISOString());
   const perItem = new Map<string, number | null>();
   let total = 0;
   let known = 0;
@@ -88,18 +88,26 @@ function viewDeltas(
 export const loadDashboard = cache(async (windowDays: WindowDays): Promise<DashboardData> => {
   const workspaceId = await getWorkspaceId();
   const now = new Date();
-  const connections = repo.listConnections(workspaceId);
-  const snapshots = repo.latestSnapshots(workspaceId);
-  const rateOverrides = repo.getRateOverrides(workspaceId);
+  const [connections, snapshots, rateOverrides, items, live, lastTick] = await Promise.all([
+    repo.listConnections(workspaceId),
+    repo.latestSnapshots(workspaceId),
+    repo.getRateOverrides(workspaceId),
+    repo.listContentItems(workspaceId, {
+      sinceIso: new Date(now.getTime() - lookbackDays() * 86_400_000).toISOString(),
+    }),
+    repo.currentlyLive(workspaceId),
+    repo.lastSchedulerRun(),
+  ]);
   const rates = resolveRates(rateOverrides);
-  const items = repo.listContentItems(workspaceId, {
-    sinceIso: new Date(now.getTime() - lookbackDays() * 86_400_000).toISOString(),
-  });
 
   const { items: estimated, channels } = estimateAll(items, snapshots, rates, { windowDays, now });
   const windowStart = now.getTime() - windowDays * 86_400_000;
   const inWindow = estimated.filter((e) => new Date(e.item.publishedAt).getTime() >= windowStart);
   const report = analyze({ items: estimated, snapshots, windowDays, now, timeZone: env().ANALYSIS_TIMEZONE });
+  const [views24h, views7d] = await Promise.all([
+    viewDeltas(workspaceId, estimated, new Date(now.getTime() - 86_400_000)),
+    viewDeltas(workspaceId, estimated, new Date(now.getTime() - 7 * 86_400_000)),
+  ]);
 
   return {
     workspaceId,
@@ -114,10 +122,10 @@ export const loadDashboard = cache(async (windowDays: WindowDays): Promise<Dashb
     inWindow,
     channels,
     report,
-    views24h: viewDeltas(workspaceId, estimated, new Date(now.getTime() - 86_400_000)),
-    views7d: viewDeltas(workspaceId, estimated, new Date(now.getTime() - 7 * 86_400_000)),
-    live: repo.currentlyLive(workspaceId),
+    views24h,
+    views7d,
+    live,
     hasData: items.length > 0,
-    lastTick: repo.lastSchedulerRun(),
+    lastTick,
   };
 });

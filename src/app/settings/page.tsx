@@ -41,9 +41,11 @@ const CREDENTIAL_HINT = {
 export default async function SettingsPage({ searchParams }: PageWithSearchParams) {
   const params = await searchParams;
   const workspaceId = await getWorkspaceId();
-  const connections = listConnections(workspaceId);
-  const overrides = getRateOverrides(workspaceId);
-  const lastRun = lastSchedulerRun();
+  const [connections, overrides, lastRun] = await Promise.all([
+    listConnections(workspaceId),
+    getRateOverrides(workspaceId),
+    lastSchedulerRun(),
+  ]);
   const e = env();
   const origin = await appOriginFromContext();
   const coach = coachAvailability();

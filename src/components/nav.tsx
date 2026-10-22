@@ -1,4 +1,7 @@
+import { Show, SignInButton, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
+import { Suspense } from "react";
+import { buttonVariants } from "@/components/ui/button";
 import { NavLinks } from "./nav-links";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -11,11 +14,30 @@ export function Nav() {
             <span aria-hidden className="inline-block size-2.5 rounded-full bg-foreground" />
             <span className="hidden sm:inline">CloutCraft</span>
           </Link>
-          <div className="min-w-0 flex-1">
-            <NavLinks />
-          </div>
+          {/* <Show> reads the request, so it sits behind Suspense (per Clerk's App Router guidance). */}
+          <Suspense>
+            <Show when="signed-in">
+              <div className="min-w-0 flex-1">
+                <NavLinks />
+              </div>
+            </Show>
+          </Suspense>
         </div>
-        <ThemeToggle />
+        <div className="flex shrink-0 items-center gap-2">
+          <ThemeToggle />
+          <Suspense>
+            <Show when="signed-in">
+              <UserButton />
+            </Show>
+            <Show when="signed-out">
+              <SignInButton mode="redirect">
+                <button type="button" className={buttonVariants({ variant: "outline", size: "sm" })}>
+                  Sign in
+                </button>
+              </SignInButton>
+            </Show>
+          </Suspense>
+        </div>
       </div>
     </header>
   );

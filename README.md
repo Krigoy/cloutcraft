@@ -21,8 +21,11 @@ A self-hosted dashboard for creators that connects to **YouTube, Twitch and TikT
 ```bash
 npm install
 npm run setup          # writes .env.local with a fresh encryption key + cron secret
-npm run dev            # http://localhost:3000 → Settings → “Install demo channels”
+# add your Clerk keys to .env.local (see "Auth and database" below)
+npm run dev            # http://localhost:3000 → sign up → Settings → “Install demo channels”
 ```
+
+Locally the database is an embedded Postgres in `./data/pglite`, so no database setup is needed; set `DATABASE_URL` to use Supabase instead.
 
 Optional, in a second terminal:
 
@@ -80,6 +83,8 @@ Everything operational is an environment variable with a default (see [.env.exam
 
 ## Security notes
 
+- Every page except the landing page and sign-in/up requires a Clerk session (`src/proxy.ts`); each user only ever sees their own workspace, and the OAuth callback refuses to link an account to anyone but the user who started the flow.
+- Supabase tables have Row Level Security enabled with no policies, so the auto-generated REST API (public anon key) can read nothing; the app connects directly as the database owner.
 - OAuth tokens are encrypted at rest; only the derived analytics summary is ever sent to the LLM provider (or nothing leaves the machine with Ollama).
 - Mutating routes (`/api/sync`, `/api/demo`, disconnect) reject cross-site browser requests via Fetch Metadata / `Origin`; `/api/cron/tick` requires `CRON_SECRET` in production (constant-time compared); post-action redirects only follow same-origin referers.
 - OAuth `state` is single-use with a TTL. TikTok, Twitch and YouTube flows use the authorization-code grant with the client secret kept server-side.
@@ -94,16 +99,23 @@ src/lib/insights/    analyze.ts (pure statistics → InsightReport with findings
 src/lib/ai/          coach.ts (provider chain + validation) · providers.ts (Gemini/Groq/Ollama via OpenAI-compatible API, Anthropic SDK) · schema.ts (zod)
 src/lib/sync.ts      token refresh → adapter.sync → store snapshot, items, metric history
 src/lib/scheduler.ts tick(): live sampling + periodic full sync
-src/lib/db/          better-sqlite3 schema + repository
+src/lib/db/          Postgres (Supabase via postgres.js, or embedded PGlite locally) · schema.ts · repo.ts
+src/lib/session.ts   Clerk user id → workspace id
+src/proxy.ts         Clerk auth gate (Next 16 proxy)
 src/app/             overview · content · coach · settings · API routes (auth, sync, demo, cron)
 ```
 
-Single-workspace today: `src/lib/session.ts` is the one place to plug in real sign-in later.
+## Auth and database
 
-## Deploying
+- **Clerk**: create an application at [dashboard.clerk.com](https://dashboard.clerk.com) and copy `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. Sign-in lives at `/sign-in`, sign-up at `/sign-up`; after either you land on `/dashboard`.
+- **Supabase**: create a project, then **Connect → Session pooler** (`*.pooler.supabase.com:5432`) → `DATABASE_URL`. Don't use the direct connection (IPv6-only, Vercel can't reach it) or the transaction pooler on 6543 (it intermittently drops queries with postgres.js, leaving pages loading forever). The schema is created automatically on first request (idempotent, with Row Level Security enabled); nothing to run by hand.
 
-- SQLite needs a persistent disk: run on a VPS, Docker volume, Fly.io volume, etc. For serverless hosts swap `src/lib/db` for Postgres/Turso.
-- Set `APP_URL` to the public HTTPS origin, set `CRON_SECRET`, and schedule `POST /api/cron/tick` once a minute.
+## Deploying to Vercel
+
+1. Import the GitHub repo at vercel.com/new (Next.js is detected automatically).
+2. Environment variables: `APP_URL` (your production URL), `APP_ENCRYPTION_KEY` (generate a new one for production and never change it, or stored tokens become unreadable), `CRON_SECRET`, `DATABASE_URL`, the two Clerk keys (use a Clerk **production** instance for your real domain), and your coach / platform keys.
+3. Register `https://<your-domain>/api/auth/<platform>/callback` with YouTube, Twitch and TikTok.
+4. `vercel.json` schedules a daily full sync. Live viewer sampling needs a ping every minute, which the Hobby plan's cron can't do: point a free pinger (e.g. cron-job.org) at `POST https://<your-domain>/api/cron/tick` with `Authorization: Bearer <CRON_SECRET>`, or use per-minute Vercel Cron on Pro. The endpoint returns only counts, so nothing user-specific ends up in the pinger's logs.
 
 ## Roadmap ideas
 

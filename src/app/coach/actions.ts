@@ -30,7 +30,7 @@ export async function runCoachAction(
 
   try {
     const result = await runCoach({ report: data.report, snapshots: data.snapshots, creatorNotes: notes });
-    const runId = saveCoachRun(data.workspaceId, {
+    const runId = await saveCoachRun(data.workspaceId, {
       model: `${result.provider}/${result.model}`,
       input: result.input,
       output: result.report,
