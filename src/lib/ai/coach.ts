@@ -81,11 +81,17 @@ Rules:
 - If "creatorNotes" is absent, set "answer" to an empty string.
 - Respond with a single JSON object that matches the provided schema exactly.`;
 
-/** Trim the report to what the model needs so the prompt stays compact. */
-export function buildCoachPayload(input: CoachInput): unknown {
+/**
+ * Trim the report to what the model needs so the prompt stays compact.
+ * `compact` is for providers with a small per-minute token budget (Groq's
+ * free tier): fewer rows, shorter text, same shape.
+ */
+export function buildCoachPayload(input: CoachInput, opts: { compact?: boolean } = {}): unknown {
   const r = input.report;
+  const compact = opts.compact ?? false;
   const round = (x: number, d = 2) => Number(x.toFixed(d));
   const money = (x: number) => round(x, 2);
+  const clip = (text: string, max: number) => (compact && text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
   return {
     windowDays: r.windowDays,
@@ -146,7 +152,7 @@ export function buildCoachPayload(input: CoachInput): unknown {
       daysSinceLast: round(c.daysSinceLast, 1),
     })),
     timing: r.timing
-      .filter((t) => t.count >= 3)
+      .filter((t) => t.count >= (compact ? 4 : 3))
       .map((t) => ({
         platform: t.platform,
         kind: t.kind,
@@ -155,13 +161,13 @@ export function buildCoachPayload(input: CoachInput): unknown {
         medianViews: Math.round(t.medianViews),
         lift: round(t.lift),
       })),
-    durationBuckets: r.durationBuckets.filter((d) => d.count >= 2).map((d) => ({
+    durationBuckets: r.durationBuckets.filter((d) => d.count >= (compact ? 3 : 2)).map((d) => ({
       ...d,
       medianViews: Math.round(d.medianViews),
       medianEarningsMid: money(d.medianEarningsMid),
       earningsLift: round(d.earningsLift),
     })),
-    topPerformers: r.topPerformers.map((s) => ({
+    topPerformers: r.topPerformers.slice(0, compact ? 3 : undefined).map((s) => ({
       platform: s.platform,
       kind: s.kind,
       title: s.title,
@@ -172,7 +178,7 @@ export function buildCoachPayload(input: CoachInput): unknown {
       engagementRate: round(s.engagementRate, 4),
       earningsMidUsd: money(s.earningsMid),
     })),
-    underperformers: r.underperformers.slice(0, 3).map((s) => ({
+    underperformers: r.underperformers.slice(0, compact ? 2 : 3).map((s) => ({
       platform: s.platform,
       kind: s.kind,
       title: s.title,
@@ -181,13 +187,13 @@ export function buildCoachPayload(input: CoachInput): unknown {
     })),
     // `detail` already carries the numbers; the raw metrics object (with
     // joined title lists) roughly doubles the token count without adding facts.
-    findings: r.findings.map((f) => ({
+    findings: r.findings.slice(0, compact ? 9 : undefined).map((f) => ({
       id: f.id,
       type: f.type,
       severity: f.severity,
       platform: f.platform,
       title: f.title,
-      detail: f.detail,
+      detail: clip(f.detail, 220),
     })),
     goals: input.goals?.length
       ? input.goals.map((g) => ({
@@ -198,7 +204,13 @@ export function buildCoachPayload(input: CoachInput): unknown {
         }))
       : undefined,
     creatorNotes: input.creatorNotes?.trim() || undefined,
-    conversation: input.conversation?.length ? input.conversation : undefined,
+    conversation: input.conversation?.length
+      ? input.conversation.map((turn) => ({
+          question: clip(turn.question, 300),
+          answer: clip(turn.answer, 360),
+          recommendations: compact ? turn.recommendations.slice(0, 4) : turn.recommendations,
+        }))
+      : undefined,
   };
 }
 
@@ -218,7 +230,8 @@ export async function runCoach(input: CoachInput): Promise<CoachRunResult> {
   }
 
   const payload = buildCoachPayload(input);
-  const base = `Here is the analytics report for this creator as JSON. Produce the growth plan.\n\n${JSON.stringify(payload)}`;
+  const compactPayload = buildCoachPayload(input, { compact: true });
+  const userMessage = (p: unknown) => `Here is the analytics report for this creator as JSON. Produce the growth plan.\n\n${JSON.stringify(p)}`;
   // Free tiers with a small token budget get a shorter plan rather than a truncated one.
   const compactNote =
     "\n\nOutput budget is tight for this request: give exactly 3 recommendations, playbooks of 3 steps, 2 metrics each, 3 actions per week, and keep every string under 45 words. Every schema field is still required.";
@@ -238,7 +251,7 @@ export async function runCoach(input: CoachInput): Promise<CoachRunResult> {
     try {
       const result = await completeJson(cfg, {
         system: SYSTEM_PROMPT,
-        user: cfg.compact ? base + compactNote : base,
+        user: cfg.compact ? userMessage(compactPayload) + compactNote : userMessage(payload),
         schema: CoachReportSchema,
         schemaName: "growth_plan",
         timeoutMs: Math.min(PER_ATTEMPT_MS, remaining),

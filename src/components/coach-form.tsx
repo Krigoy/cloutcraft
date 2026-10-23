@@ -1,8 +1,7 @@
 "use client";
 
 import { Loader2, Sparkles } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { runCoachAction, type CoachActionState } from "@/app/coach/actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -27,15 +26,9 @@ export function CoachForm({
   disabledReason?: string;
   providerLabel?: string;
 }) {
+  // On success the action redirects to the new turn itself; only errors come back as state.
   const [state, formAction, pending] = useActionState(runCoachAction, INITIAL);
-  const router = useRouter();
   const followUp = threadId !== undefined;
-
-  useEffect(() => {
-    if (state.status === "ok" && state.threadId) {
-      router.replace(`/coach?window=${windowDays}&thread=${state.threadId}#turn-${state.runId}`);
-    }
-  }, [state, router, windowDays]);
 
   return (
     <form action={formAction} className="space-y-3" key={threadId ?? "new"}>

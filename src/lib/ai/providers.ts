@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ZodType } from "zod";
 import { env } from "@/lib/env";
-import { toJsonSchema } from "./json-schema";
+import { estimateTokens, toJsonSchema } from "./json-schema";
 
 /**
  * LLM providers for the coach. Gemini, Groq and Ollama all expose an
@@ -160,6 +160,10 @@ function groqReasoningEffort(effort: string): "low" | "medium" {
 
 /** Groq free tier: keep prompt + completion inside the per-minute budget. */
 const GROQ_MAX_TOKENS = 6000;
+/** Free-tier tokens-per-minute limit (8,000) with headroom for the estimate being rough. */
+const GROQ_TPM_BUDGET = 7400;
+/** Below this a compact plan gets cut off; the provider then fails over instead of truncating. */
+const GROQ_MIN_OUTPUT_TOKENS = 2800;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -169,6 +173,15 @@ async function completeOpenAiCompatible<T>(
 ): Promise<JsonCompletionResult> {
   const e = env();
   const { url, key } = openAiEndpoint(cfg.id);
+  // Field descriptions stay in even on tight budgets: without them gpt-oss drops required fields.
+  const schema = toJsonSchema(req.schema);
+  // Groq's free tier counts prompt + max_tokens against an 8k tokens-per-minute
+  // limit, so the output allowance is whatever the prompt leaves over.
+  const promptTokens = estimateTokens(req.system, req.user, JSON.stringify(schema));
+  const maxTokens =
+    cfg.id === "groq"
+      ? Math.max(GROQ_MIN_OUTPUT_TOKENS, Math.min(e.COACH_MAX_TOKENS, GROQ_MAX_TOKENS, GROQ_TPM_BUDGET - promptTokens))
+      : e.COACH_MAX_TOKENS;
   const body: Record<string, unknown> = {
     model: cfg.model,
     messages: [
@@ -177,9 +190,9 @@ async function completeOpenAiCompatible<T>(
     ],
     response_format: {
       type: "json_schema",
-      json_schema: { name: req.schemaName, strict: true, schema: toJsonSchema(req.schema) },
+      json_schema: { name: req.schemaName, strict: true, schema },
     },
-    max_tokens: cfg.id === "groq" ? Math.min(e.COACH_MAX_TOKENS, GROQ_MAX_TOKENS) : e.COACH_MAX_TOKENS,
+    max_tokens: maxTokens,
   };
   if (cfg.id === "groq" && /gpt-oss/.test(cfg.model)) body.reasoning_effort = groqReasoningEffort(e.COACH_EFFORT);
 
@@ -188,6 +201,7 @@ async function completeOpenAiCompatible<T>(
   // Every attempt is bounded so a hung upstream can't eat the whole budget.
   const started = Date.now();
   let res: Response | undefined;
+  let payload: OpenAICompatibleResponse = {};
   for (let attempt = 0; attempt < 2; attempt++) {
     const remaining = req.timeoutMs - (Date.now() - started);
     if (remaining < 3000) throw new ProviderError(cfg.id, "network", "out of time");
@@ -203,12 +217,19 @@ async function completeOpenAiCompatible<T>(
       const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
       throw new ProviderError(cfg.id, "network", timedOut ? `no response within ${Math.round(req.timeoutMs / 1000)}s` : err instanceof Error ? err.message : "request failed");
     }
+    payload = (await res.json().catch(() => ({}))) as OpenAICompatibleResponse;
     if (res.status !== 503 && res.status !== 429) break;
-    if (attempt === 0) await sleep(1500);
+    if (attempt === 0) {
+      // A per-minute limit tells us how long until the window clears (Groq:
+      // "Please try again in 12.4s" / Retry-After). Waiting it out — inside the
+      // attempt budget — is what lets a follow-up sent right after a plan succeed.
+      const wait = Math.min(retryAfterMs(res, payload), req.timeoutMs - (Date.now() - started) - 3000);
+      if (wait < 0) break;
+      await sleep(Math.max(1500, wait));
+    }
   }
   if (!res) throw new ProviderError(cfg.id, "network", "no response");
 
-  const payload = (await res.json().catch(() => ({}))) as OpenAICompatibleResponse;
   if (!res.ok) {
     const message = payload.error?.message ?? `HTTP ${res.status}`;
     const code = res.status === 401 || res.status === 403 ? "auth" : res.status === 429 ? "rate_limit" : "api";
@@ -224,6 +245,16 @@ async function completeOpenAiCompatible<T>(
     model: payload.model ?? cfg.model,
     usage: { inputTokens: payload.usage?.prompt_tokens ?? 0, outputTokens: payload.usage?.completion_tokens ?? 0 },
   };
+}
+
+/** Delay a rate-limited endpoint asked for, from Retry-After or the message body; 1.5 s when it didn't say. */
+function retryAfterMs(res: Response, payload: OpenAICompatibleResponse): number {
+  const header = Number(res.headers.get("retry-after"));
+  if (Number.isFinite(header) && header > 0) return header * 1000;
+  const m = /try again in ([\d.]+)\s*(ms|s|m)\b/i.exec(payload.error?.message ?? "");
+  if (!m) return 1500;
+  const n = Number(m[1]);
+  return m[2] === "ms" ? n : m[2] === "m" ? n * 60_000 : n * 1000;
 }
 
 async function completeAnthropic<T>(cfg: ProviderConfig, req: JsonCompletionRequest<T>): Promise<JsonCompletionResult> {

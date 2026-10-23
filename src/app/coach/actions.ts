@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { CoachError, runCoach, type ConversationTurn } from "@/lib/ai/coach";
 import { coachAvailability } from "@/lib/ai/providers";
 import type { CoachReport } from "@/lib/ai/schema";
@@ -47,6 +48,7 @@ export async function runCoachAction(
     // A fresh conversation with no question is a general review.
   }
 
+  let saved: { id: number; threadId: number };
   try {
     const goals = data.goals.map(({ goal, projection, label }) => ({
       label,
@@ -60,8 +62,14 @@ export async function runCoachAction(
       projectedDate: projection.projectedDate,
       verdict: projection.verdict,
     }));
+    const startedAt = Date.now();
     const result = await runCoach({ report: data.report, snapshots: data.snapshots, creatorNotes: notes, conversation, goals });
-    const saved = await saveCoachRun(data.workspaceId, {
+    // One line per plan in the server log: enough to see which provider answered and how long it took, no content.
+    console.info(
+      `[coach] ${result.provider}/${result.model} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s` +
+        (result.failedOver.length ? ` after ${result.failedOver.join("; ")}` : ""),
+    );
+    saved = await saveCoachRun(data.workspaceId, {
       model: `${result.provider}/${result.model}`,
       input: result.input,
       output: result.report,
@@ -75,10 +83,12 @@ export async function runCoachAction(
         creatorNotes: notes || undefined,
       },
     });
-    revalidatePath("/coach");
-    return { status: "ok", runId: saved.id, threadId: saved.threadId };
   } catch (err) {
     const message = err instanceof CoachError ? err.message : "Unexpected error while generating the plan.";
     return { status: "error", message };
   }
+  // Navigate from the server: the revalidated page swaps in the thread view and
+  // remounts the form, so a client-side effect on the result would never run.
+  revalidatePath("/coach");
+  redirect(`/coach?window=${windowDays}&thread=${saved.threadId}#turn-${saved.id}`);
 }

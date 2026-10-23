@@ -1,5 +1,6 @@
 import { FlaskConical, MessageSquare, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { ConfirmSubmit } from "@/components/confirm-submit";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import type { CoachThreadSummary } from "@/lib/db/repo";
@@ -110,13 +111,13 @@ export function CoachSidebar({
                         className="absolute top-1.5 right-1 opacity-0 transition-opacity group-hover/thread:opacity-100 focus-within:opacity-100"
                       >
                         <input type="hidden" name="window" value={windowDays} />
-                        <button
-                          type="submit"
+                        <ConfirmSubmit
+                          message={`Delete the conversation “${t.title || "General review"}” and its ${t.turns === 1 ? "plan" : `${t.turns} plans`}? This can't be undone.`}
                           aria-label={`Delete conversation “${t.title || "General review"}”`}
                           className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
                         >
                           <Trash2 className="size-3.5" />
-                        </button>
+                        </ConfirmSubmit>
                       </form>
                     </li>
                   );
