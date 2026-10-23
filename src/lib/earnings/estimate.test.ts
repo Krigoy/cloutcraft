@@ -112,3 +112,46 @@ describe("estimateAll", () => {
     expect(channels.youtube?.total.mid).toBeCloseTo(25, 6);
   });
 });
+
+describe("calibrateToPayouts", () => {
+  it("fits one factor per platform from real payouts and leaves reported items alone", () => {
+    const items = [
+      item({ platform: "youtube", kind: "video", externalId: "a", publishedAt: "2026-09-05T00:00:00Z", views: 10_000 }), // model $25
+      item({ platform: "youtube", kind: "video", externalId: "b", publishedAt: "2026-09-20T00:00:00Z", views: 10_000 }), // model $25
+      item({ platform: "youtube", kind: "video", externalId: "c", publishedAt: "2026-09-25T00:00:00Z", reportedRevenueUsd: 10 }),
+      item({ platform: "youtube", kind: "video", externalId: "d", publishedAt: "2026-10-10T00:00:00Z", views: 10_000 }), // outside the payout period
+      item({ platform: "tiktok", kind: "video", externalId: "t", publishedAt: "2026-09-10T00:00:00Z", durationSec: 90, views: 100_000 }),
+    ];
+    const { items: out, calibration, channels } = estimateAll(items, {}, rates, {
+      windowDays: 90,
+      now: NOW,
+      // $110 paid for September: $10 is already reported, so $100 covers $50 of modelled content → ×2.
+      payoutReports: [{ id: 1, platform: "youtube", periodStart: "2026-09-01", periodEnd: "2026-09-30", amountUsd: 110, source: "youtube_studio", note: null }],
+    });
+    expect(calibration.youtube?.factor).toBeCloseTo(2, 5);
+    expect(calibration.youtube?.reports).toBe(1);
+    const by = Object.fromEntries(out.map((e) => [e.item.externalId, e.estimate]));
+    expect(by.a.mid).toBeCloseTo(50, 5);
+    expect(by.d.mid).toBeCloseTo(50, 5); // the whole platform model is rescaled, not just the period
+    expect(by.d.basis).toBe("calibrated");
+    expect(by.c.mid).toBe(10); // reported stays reported
+    expect(by.c.basis).toBe("reported");
+    expect(by.t.basis).toBe("modeled"); // other platforms untouched
+    expect(channels.youtube?.notes.join(" ")).toMatch(/Calibrated ×2.00 to 1 real payout/);
+  });
+
+  it("skips payouts with no modelled content in their period and clamps extreme factors", () => {
+    const items = [item({ platform: "twitch", kind: "live", externalId: "s", publishedAt: "2026-10-05T00:00:00Z", durationSec: 7200, avgViewers: 100, views: 900 })];
+    const { calibration } = estimateAll(items, {}, rates, {
+      windowDays: 90,
+      now: NOW,
+      payoutReports: [
+        { id: 1, platform: "twitch", periodStart: "2026-08-01", periodEnd: "2026-08-31", amountUsd: 500, source: "twitch_payout", note: null },
+        { id: 2, platform: "twitch", periodStart: "2026-10-01", periodEnd: "2026-10-31", amountUsd: 5000, source: "twitch_payout", note: null },
+      ],
+    });
+    expect(calibration.twitch?.reports).toBe(1);
+    expect(calibration.twitch?.skipped).toBe(1);
+    expect(calibration.twitch?.factor).toBe(5); // clamped at maxFactor
+  });
+});

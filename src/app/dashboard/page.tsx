@@ -43,6 +43,7 @@ export default async function DashboardPage({ searchParams }: PageWithSearchPara
   const followers = Object.values(data.snapshots).reduce((s, snap) => s + (snap.followers ?? 0), 0);
   const topFindings = report.findings.slice(0, 6);
   const isDemo = data.connections.some((c) => c.isDemo);
+  const calibratedPlatforms = Object.values(data.calibration).filter((c) => c.reports > 0);
 
   return (
     <Reveal className="space-y-6">
@@ -100,7 +101,13 @@ export default async function DashboardPage({ searchParams }: PageWithSearchPara
                   {formatPercent(Math.abs(growth.earningsChange))} vs. previous {windowDays} days
                 </span>
               )}
-              <span>Mid estimate with low–high band.</span>
+              {calibratedPlatforms.length > 0 ? (
+                <Link href="/settings#payouts" className="hover:underline">
+                  Calibrated to your {calibratedPlatforms.map((c) => PLATFORM_LABEL[c.platform]).join(" and ")} payouts.
+                </Link>
+              ) : (
+                <span>Mid estimate with low–high band.</span>
+              )}
             </div>
           </CardContent>
         </Card>

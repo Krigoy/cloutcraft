@@ -224,3 +224,22 @@ describe("experiments", () => {
     expect(await repo.listExperiments(B)).toHaveLength(1);
   });
 });
+
+describe("payout reports", () => {
+  it("stores, lists newest-period first, and deletes per workspace", async () => {
+    const older = await repo.addPayoutReport(A, { platform: "youtube", periodStart: "2026-08-01", periodEnd: "2026-08-31", amountUsd: 120.5, source: "youtube_studio", note: null });
+    const newer = await repo.addPayoutReport(A, { platform: "twitch", periodStart: "2026-09-01", periodEnd: "2026-09-30", amountUsd: 80, source: "twitch_payout", note: "incl. bits" });
+    await repo.addPayoutReport(B, { platform: "youtube", periodStart: "2026-09-01", periodEnd: "2026-09-30", amountUsd: 1, source: "other", note: null });
+
+    const list = await repo.listPayoutReports(A);
+    expect(list.map((p) => [p.id, p.platform, p.amountUsd, p.note])).toEqual([
+      [newer, "twitch", 80, "incl. bits"],
+      [older, "youtube", 120.5, null],
+    ]);
+    await repo.deletePayoutReport(B, older); // not Bob's → no-op
+    expect(await repo.listPayoutReports(A)).toHaveLength(2);
+    await repo.deletePayoutReport(A, older);
+    expect((await repo.listPayoutReports(A)).map((p) => p.id)).toEqual([newer]);
+    expect(await repo.listPayoutReports(B)).toHaveLength(1);
+  });
+});

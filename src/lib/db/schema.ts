@@ -115,6 +115,18 @@ const TABLES = [
     source_index INTEGER
   )`,
   `CREATE INDEX IF NOT EXISTS idx_experiments_ws ON experiments (workspace_id, status, started_at)`,
+  `CREATE TABLE IF NOT EXISTS payout_reports (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    amount_usd DOUBLE PRECISION NOT NULL,
+    source TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_payouts_ws ON payout_reports (workspace_id, platform, period_start)`,
 ];
 
 /** Additive migrations for existing databases (all IF NOT EXISTS). */
@@ -135,6 +147,7 @@ const TABLE_NAMES = [
   "rate_overrides",
   "coach_runs",
   "experiments",
+  "payout_reports",
 ];
 
 export const SCHEMA_SQL: string[] = [

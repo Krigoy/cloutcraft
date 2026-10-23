@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import * as repo from "@/lib/db/repo";
-import { estimateAll, type ChannelEarnings, type EstimatedItem } from "@/lib/earnings/estimate";
+import { estimateAll, type ChannelEarnings, type EstimatedItem, type PayoutCalibration, type PayoutReport } from "@/lib/earnings/estimate";
 import { resolveRates, type Rates } from "@/lib/earnings/rates";
 import { analyze, type InsightReport } from "@/lib/insights/analyze";
 import type { ChannelSnapshot, LiveSample, Platform } from "@/lib/platforms/types";
@@ -53,6 +53,9 @@ export interface DashboardData {
   /** Items published inside the window. */
   inWindow: EstimatedItem[];
   channels: Partial<Record<Platform, ChannelEarnings>>;
+  /** Real payouts the creator entered, and the per-platform factor fitted from them. */
+  payoutReports: PayoutReport[];
+  calibration: Partial<Record<Platform, PayoutCalibration>>;
   report: InsightReport;
   views24h: ViewDeltas;
   views7d: ViewDeltas;
@@ -88,10 +91,11 @@ async function viewDeltas(
 export const loadDashboard = cache(async (windowDays: WindowDays): Promise<DashboardData> => {
   const workspaceId = await getWorkspaceId();
   const now = new Date();
-  const [connections, snapshots, rateOverrides, items, live, lastTick] = await Promise.all([
+  const [connections, snapshots, rateOverrides, payoutReports, items, live, lastTick] = await Promise.all([
     repo.listConnections(workspaceId),
     repo.latestSnapshots(workspaceId),
     repo.getRateOverrides(workspaceId),
+    repo.listPayoutReports(workspaceId),
     repo.listContentItems(workspaceId, {
       sinceIso: new Date(now.getTime() - lookbackDays() * 86_400_000).toISOString(),
     }),
@@ -100,7 +104,7 @@ export const loadDashboard = cache(async (windowDays: WindowDays): Promise<Dashb
   ]);
   const rates = resolveRates(rateOverrides);
 
-  const { items: estimated, channels } = estimateAll(items, snapshots, rates, { windowDays, now });
+  const { items: estimated, channels, calibration } = estimateAll(items, snapshots, rates, { windowDays, now, payoutReports });
   const windowStart = now.getTime() - windowDays * 86_400_000;
   const inWindow = estimated.filter((e) => new Date(e.item.publishedAt).getTime() >= windowStart);
   const report = analyze({ items: estimated, snapshots, windowDays, now, timeZone: env().ANALYSIS_TIMEZONE });
@@ -121,6 +125,8 @@ export const loadDashboard = cache(async (windowDays: WindowDays): Promise<Dashb
     estimated,
     inWindow,
     channels,
+    payoutReports,
+    calibration,
     report,
     views24h,
     views7d,

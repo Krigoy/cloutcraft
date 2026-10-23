@@ -10,6 +10,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PayoutCalibrationSection } from "@/components/payout-calibration";
+import { loadDashboard, parseWindow } from "@/lib/dashboard";
 import { getRateOverrides, lastSchedulerRun, listConnections } from "@/lib/db/repo";
 import { RATE_DEFINITIONS } from "@/lib/earnings/rates";
 import { coachAvailability, providerConfigs } from "@/lib/ai/providers";
@@ -41,10 +43,12 @@ const CREDENTIAL_HINT = {
 export default async function SettingsPage({ searchParams }: PageWithSearchParams) {
   const params = await searchParams;
   const workspaceId = await getWorkspaceId();
-  const [connections, overrides, lastRun] = await Promise.all([
+  const [connections, overrides, lastRun, data] = await Promise.all([
     listConnections(workspaceId),
     getRateOverrides(workspaceId),
     lastSchedulerRun(),
+    // Same numbers the dashboard uses, so the calibration badges match what the user sees there.
+    loadDashboard(parseWindow(params.window)),
   ]);
   const e = env();
   const origin = await appOriginFromContext();
@@ -236,12 +240,16 @@ export default async function SettingsPage({ searchParams }: PageWithSearchParam
         </Card>
       </section>
 
+      {/* Real payouts → calibration */}
+      <PayoutCalibrationSection reports={data.payoutReports} calibration={data.calibration} />
+
       {/* Rates */}
       <section id="rates" className="space-y-3">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Payout assumptions</h2>
           <p className="text-sm text-muted-foreground">
             Estimates use these bands wherever a platform doesn’t report income. Leave a field blank to keep the default; set only “mid” and the band scales with it.
+            Real payouts above rescale the result on top of these.
           </p>
         </div>
         <form action={saveRatesAction}>

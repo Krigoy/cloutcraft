@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { env } from "@/lib/env";
+import type { PayoutReport } from "@/lib/earnings/estimate";
 import type { ExperimentMetric, ExperimentSegment, ExperimentStatus } from "@/lib/experiments/score";
 import type {
   ChannelSnapshot,
@@ -735,4 +736,53 @@ export async function setExperimentStatus(workspaceId: string, id: number, statu
 
 export async function deleteExperiment(workspaceId: string, id: number): Promise<void> {
   await (await db()).query(`DELETE FROM experiments WHERE workspace_id = $1 AND id = $2`, [workspaceId, id]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Real payouts (calibration)                                          */
+/* ------------------------------------------------------------------ */
+
+interface PayoutRow {
+  [key: string]: unknown;
+  id: number;
+  platform: Platform;
+  period_start: string;
+  period_end: string;
+  amount_usd: number;
+  source: string;
+  note: string | null;
+}
+
+export async function addPayoutReport(
+  workspaceId: string,
+  input: Omit<PayoutReport, "id">,
+): Promise<number> {
+  const [row] = await (await db()).query<{ id: number }>(
+    `INSERT INTO payout_reports (workspace_id, platform, period_start, period_end, amount_usd, source, note, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [workspaceId, input.platform, input.periodStart, input.periodEnd, input.amountUsd, input.source, input.note, new Date().toISOString()],
+  );
+  return Number(row.id);
+}
+
+/** Newest period first. */
+export async function listPayoutReports(workspaceId: string): Promise<PayoutReport[]> {
+  const rows = await (await db()).query<PayoutRow>(
+    `SELECT id, platform, period_start, period_end, amount_usd, source, note FROM payout_reports
+     WHERE workspace_id = $1 ORDER BY period_end DESC, id DESC`,
+    [workspaceId],
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    platform: r.platform,
+    periodStart: r.period_start,
+    periodEnd: r.period_end,
+    amountUsd: Number(r.amount_usd),
+    source: r.source,
+    note: r.note,
+  }));
+}
+
+export async function deletePayoutReport(workspaceId: string, id: number): Promise<void> {
+  await (await db()).query(`DELETE FROM payout_reports WHERE workspace_id = $1 AND id = $2`, [workspaceId, id]);
 }

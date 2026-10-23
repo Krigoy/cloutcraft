@@ -67,15 +67,46 @@ export const DEFAULT_CALIBRATION: CalibrationTuning = { minFactor: 0.2, maxFacto
 /** Average Gregorian month, used to turn monthly subscription income into a window figure. */
 export const DAYS_PER_MONTH = 365.25 / 12;
 
+/** A real payout the creator entered (YouTube Studio, Twitch payout, TikTok Rewards…). */
+export interface PayoutReport {
+  id: number;
+  platform: Platform;
+  /** Inclusive ISO dates (YYYY-MM-DD) of the period the payout covers. */
+  periodStart: string;
+  periodEnd: string;
+  amountUsd: number;
+  source: string;
+  note: string | null;
+}
+
+/** How a platform's model was rescaled to match the creator's real payouts. */
+export interface PayoutCalibration {
+  platform: Platform;
+  factor: number;
+  reportedUsd: number;
+  modeledUsd: number;
+  /** Reports that could be matched to modelled content. */
+  reports: number;
+  /** Reports skipped because no modelled content fell in their period. */
+  skipped: number;
+  /** ± band applied around the calibrated mid. */
+  band: number;
+  /** Why nothing was rescaled, when `reports` is 0. */
+  reason?: string;
+}
+
 export interface EstimateOptions {
   windowDays: number;
   now?: Date;
   calibration?: Partial<CalibrationTuning>;
+  /** Real payouts to calibrate the per-platform model against. */
+  payoutReports?: PayoutReport[];
 }
 
 export interface EstimateOutput {
   items: EstimatedItem[];
   channels: Partial<Record<Platform, ChannelEarnings>>;
+  calibration: Partial<Record<Platform, PayoutCalibration>>;
 }
 
 export const ZERO: EstimateRange = { low: 0, mid: 0, high: 0 };
@@ -326,6 +357,105 @@ function calibrateYoutube(
   }
 }
 
+/** Scale one estimate's mid by `factor` and rebuild the band around it. */
+function rescale(e: EarningsEstimate, factor: number, band: number): void {
+  const mid = e.mid * factor;
+  e.mid = mid;
+  e.low = mid * (1 - band);
+  e.high = mid * (1 + band);
+  e.breakdown = e.breakdown.map((b) => ({ ...b, mid: b.mid * factor, low: b.mid * factor * (1 - band), high: b.mid * factor * (1 + band) }));
+}
+
+/**
+ * Fit one factor per platform from the creator's real payouts: the sum of
+ * what they were paid over the sum of what the model says for content
+ * published in those periods, then rescale every modelled item on that
+ * platform. Items the platform itself reported (or that were already
+ * calibrated to a reported channel total) are a better signal and are left
+ * alone; their amounts are subtracted from the payout before fitting.
+ *
+ * Publish date stands in for earning date, so the fit is only as good as
+ * the period is long — the Settings page says so.
+ */
+export function calibrateToPayouts(
+  estimated: EstimatedItem[],
+  reports: PayoutReport[],
+  tuning: CalibrationTuning,
+): Partial<Record<Platform, PayoutCalibration>> {
+  const out: Partial<Record<Platform, PayoutCalibration>> = {};
+  const byPlatform = new Map<Platform, PayoutReport[]>();
+  for (const r of reports) byPlatform.set(r.platform, [...(byPlatform.get(r.platform) ?? []), r]);
+
+  for (const [platform, list] of byPlatform) {
+    const modeledItems = estimated.filter((e) => e.item.platform === platform && e.estimate.basis === "modeled");
+    if (modeledItems.length === 0) {
+      const platformItems = estimated.filter((e) => e.item.platform === platform);
+      const reason =
+        platformItems.length === 0
+          ? `No ${PLATFORM_NAME[platform]} uploads are synced yet, so there is nothing to calibrate.`
+          : platformItems.some((e) => e.estimate.basis === "reported" || e.estimate.basis === "calibrated")
+            ? `${PLATFORM_NAME[platform]} already reports its revenue for this channel, which is more precise than a payout total — the payout is kept for reference.`
+            : `${PLATFORM_NAME[platform]} income can't be modelled per upload here, so a payout can't rescale it.`;
+      out[platform] = { platform, factor: 1, reportedUsd: 0, modeledUsd: 0, reports: 0, skipped: list.length, band: tuning.band, reason };
+      continue;
+    }
+
+    let reportedUsd = 0;
+    let modeledUsd = 0;
+    let matched = 0;
+    const factors: number[] = [];
+    for (const r of list) {
+      const start = new Date(`${r.periodStart}T00:00:00Z`).getTime();
+      const end = new Date(`${r.periodEnd}T23:59:59.999Z`).getTime();
+      const inPeriod = (e: EstimatedItem) => {
+        const t = new Date(e.item.publishedAt).getTime();
+        return e.item.platform === platform && t >= start && t <= end;
+      };
+      const modeled = estimated.filter((e) => inPeriod(e) && e.estimate.basis === "modeled").reduce((s, e) => s + e.estimate.mid, 0);
+      const known = estimated.filter((e) => inPeriod(e) && e.estimate.basis !== "modeled").reduce((s, e) => s + e.estimate.mid, 0);
+      const remainder = r.amountUsd - known;
+      if (modeled <= 0 || remainder <= 0) continue;
+      matched++;
+      reportedUsd += remainder;
+      modeledUsd += modeled;
+      factors.push(remainder / modeled);
+    }
+    if (matched === 0 || modeledUsd <= 0) {
+      out[platform] = {
+        platform,
+        factor: 1,
+        reportedUsd: 0,
+        modeledUsd: 0,
+        reports: 0,
+        skipped: list.length,
+        band: tuning.band,
+        reason: `No modelled ${PLATFORM_NAME[platform]} uploads were published inside the payout period${list.length === 1 ? "" : "s"}, so no factor could be fitted.`,
+      };
+      continue;
+    }
+
+    const factor = Math.min(tuning.maxFactor, Math.max(tuning.minFactor, reportedUsd / modeledUsd));
+    // Several payouts that disagree widen the band; one payout keeps the default.
+    let band = tuning.band;
+    if (factors.length > 1) {
+      const mean = factors.reduce((a, b) => a + b, 0) / factors.length;
+      const sd = Math.sqrt(factors.reduce((s, f) => s + (f - mean) ** 2, 0) / factors.length);
+      band = Math.min(0.5, Math.max(0.15, sd / mean));
+    }
+    for (const e of modeledItems) {
+      rescale(e.estimate, factor, band);
+      e.estimate.basis = "calibrated";
+      e.estimate.notes.push(
+        `Scaled ×${factor.toFixed(2)} to match ${matched} real ${PLATFORM_NAME[platform]} payout${matched === 1 ? "" : "s"} you entered.`,
+      );
+    }
+    out[platform] = { platform, factor, reportedUsd, modeledUsd, reports: matched, skipped: list.length - matched, band };
+  }
+  return out;
+}
+
+const PLATFORM_NAME: Record<Platform, string> = { youtube: "YouTube", twitch: "Twitch", tiktok: "TikTok" };
+
 /* ------------------------------------------------------------------ */
 /* Entry point                                                         */
 /* ------------------------------------------------------------------ */
@@ -342,11 +472,10 @@ export function estimateAll(
     estimate: estimateItem(item, rates),
   }));
 
+  const tuning: CalibrationTuning = { ...DEFAULT_CALIBRATION, ...opts.calibration };
   allocateTwitch(estimated, snapshots.twitch, rates, opts.windowDays, now);
-  calibrateYoutube(estimated, snapshots.youtube, opts.windowDays, now, {
-    ...DEFAULT_CALIBRATION,
-    ...opts.calibration,
-  });
+  calibrateYoutube(estimated, snapshots.youtube, opts.windowDays, now, tuning);
+  const calibration = opts.payoutReports?.length ? calibrateToPayouts(estimated, opts.payoutReports, tuning) : {};
 
   const channels: Partial<Record<Platform, ChannelEarnings>> = {};
   for (const platform of ["youtube", "twitch", "tiktok"] as const) {
@@ -374,6 +503,10 @@ export function estimateAll(
           : "none";
 
     const notes: string[] = [];
+    const cal = calibration[platform];
+    if (cal && cal.reports > 0) {
+      notes.push(`Calibrated ×${cal.factor.toFixed(2)} to ${cal.reports} real payout${cal.reports === 1 ? "" : "s"} you entered in Settings.`);
+    }
     if (platform === "twitch" && !snapshots.twitch?.subs) {
       notes.push("Connect with the subscriptions scope to include sub revenue.");
     }
@@ -387,5 +520,5 @@ export function estimateAll(
     channels[platform] = { platform, windowDays: opts.windowDays, total, bySource, basis, notes };
   }
 
-  return { items: estimated, channels };
+  return { items: estimated, channels, calibration };
 }
