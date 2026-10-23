@@ -43,7 +43,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
             <TooltipProvider>
               <Nav />
-              <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+              {/* Pages that render a `data-full-bleed` root (the coach) take the whole viewport width. */}
+              <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:px-0 has-[[data-full-bleed]]:py-0">
+                {children}
+              </main>
             </TooltipProvider>
           </ThemeProvider>
         </ClerkProvider>
