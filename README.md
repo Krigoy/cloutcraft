@@ -13,7 +13,7 @@ A self-hosted dashboard for creators that connects to **YouTube, Twitch and TikT
 - **View velocity**: every scheduled sync stores a view-count snapshot per item, so you get “new views in the last 24 h / 7 d” per video and overall.
 - **Live monitoring (Twitch)**: while a channel is live the scheduler samples concurrent viewers once a minute, which gives real average/peak viewers per broadcast (Helix doesn’t expose that after the fact) and keeps streams whose VOD expires or was never saved.
 - **Deterministic insights**: per-format baselines, best weekday per format, duration sweet spots, cadence gaps, format-mix vs earnings, hidden gems (high engagement, low reach), hit concentration, platform-specific monetisation gaps. Each is a numbered finding with the metrics behind it.
-- **AI growth coach**: an LLM (Gemini 2.5 Flash by default, with Groq `gpt-oss-120b` as fallback; Claude and local Ollama also supported) reads the findings and returns prioritised recommendations with actions, expected impact and the finding ids used as evidence, plus experiments and caveats. Only the analytics summary is sent, never tokens or raw credentials.
+- **AI growth coach**: an LLM (Gemini 3.5 Flash by default, with Groq `gpt-oss-120b` as fallback; Claude and local Ollama also supported) reads the findings and returns prioritised recommendations with actions, expected impact and the finding ids used as evidence, plus a 30-day plan, experiments and caveats. Ask it a question or set a goal and it answers first; follow-ups continue the conversation, and past conversations live in a sidebar. Only the analytics summary is sent, never tokens or raw credentials.
 - **Demo mode**: three generated channels with realistic patterns so the whole app works before any platform approves your developer app.
 
 ## Quick start
@@ -115,7 +115,8 @@ src/app/             overview · content · coach · settings · API routes (aut
 1. Import the GitHub repo at vercel.com/new (Next.js is detected automatically).
 2. Environment variables: `APP_URL` (your production URL), `APP_ENCRYPTION_KEY` (generate a new one for production and never change it, or stored tokens become unreadable), `CRON_SECRET`, `DATABASE_URL`, the two Clerk keys (use a Clerk **production** instance for your real domain), and your coach / platform keys.
 3. Register `https://<your-domain>/api/auth/<platform>/callback` with YouTube, Twitch and TikTok.
-4. `vercel.json` schedules a daily full sync. Live viewer sampling needs a ping every minute, which the Hobby plan's cron can't do: point a free pinger (e.g. cron-job.org) at `POST https://<your-domain>/api/cron/tick` with `Authorization: Bearer <CRON_SECRET>`, or use per-minute Vercel Cron on Pro. The endpoint returns only counts, so nothing user-specific ends up in the pinger's logs.
+4. Keep **Fluid compute** enabled (the default for new projects): the coach route declares `maxDuration = 120`, which Hobby only allows under Fluid compute.
+5. `vercel.json` schedules a daily full sync. Live viewer sampling needs a ping every minute, which the Hobby plan's cron can't do: point a free pinger (e.g. cron-job.org) at `POST https://<your-domain>/api/cron/tick` with `Authorization: Bearer <CRON_SECRET>`, or use per-minute Vercel Cron on Pro. The endpoint returns only counts, so nothing user-specific ends up in the pinger's logs.
 
 ## Roadmap ideas
 

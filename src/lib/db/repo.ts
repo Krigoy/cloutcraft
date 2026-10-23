@@ -503,24 +503,68 @@ export async function clearRateOverrides(workspaceId: string): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Coach runs                                                          */
+/* Coach runs & conversations                                          */
 /* ------------------------------------------------------------------ */
+
+/*
+ * A conversation ("thread") is a chain of runs: the first run's id is the
+ * thread id and follow-ups carry it in thread_id. Rows written before
+ * threads existed have NULL thread_id and are treated as one-turn threads.
+ */
 
 export interface CoachRunRecord<TOutput = unknown> {
   id: number;
+  threadId: number;
   createdAt: string;
   model: string;
+  question: string;
   output: TOutput;
   usage: Record<string, unknown> | null;
 }
 
+export interface CoachThreadSummary {
+  threadId: number;
+  /** First question of the thread, or empty for a general review. */
+  title: string;
+  startedAt: string;
+  lastAt: string;
+  turns: number;
+}
+
+interface CoachRunRow {
+  [key: string]: unknown;
+  id: number;
+  thread_id: number;
+  created_at: string;
+  model: string;
+  question: string;
+  output: string;
+  usage: string | null;
+}
+
+const RUN_COLUMNS = `id, COALESCE(thread_id, id) AS thread_id, created_at, model,
+  COALESCE(question, NULLIF(usage::jsonb->>'creatorNotes', ''), '') AS question, output, usage`;
+
+function toRun<TOutput>(r: CoachRunRow): CoachRunRecord<TOutput> {
+  return {
+    id: Number(r.id),
+    threadId: Number(r.thread_id),
+    createdAt: r.created_at,
+    model: r.model,
+    question: r.question,
+    output: JSON.parse(r.output) as TOutput,
+    usage: r.usage ? (JSON.parse(r.usage) as Record<string, unknown>) : null,
+  };
+}
+
 export async function saveCoachRun(
   workspaceId: string,
-  run: { model: string; input: unknown; output: unknown; usage?: unknown },
-): Promise<number> {
-  const [row] = await (await db()).query<{ id: number }>(
-    `INSERT INTO coach_runs (workspace_id, created_at, model, input, output, usage)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+  run: { model: string; input: unknown; output: unknown; usage?: unknown; question?: string; threadId?: number },
+): Promise<{ id: number; threadId: number }> {
+  const d = await db();
+  const [row] = await d.query<{ id: number }>(
+    `INSERT INTO coach_runs (workspace_id, created_at, model, input, output, usage, thread_id, question)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [
       workspaceId,
       new Date().toISOString(),
@@ -528,30 +572,53 @@ export async function saveCoachRun(
       JSON.stringify(run.input),
       JSON.stringify(run.output),
       run.usage ? JSON.stringify(run.usage) : null,
+      run.threadId ?? null,
+      run.question?.trim() || null,
     ],
   );
-  return Number(row.id);
+  const id = Number(row.id);
+  const threadId = run.threadId ?? id;
+  if (run.threadId === undefined) {
+    await d.query(`UPDATE coach_runs SET thread_id = $1 WHERE workspace_id = $2 AND id = $1`, [id, workspaceId]);
+  }
+  return { id, threadId };
 }
 
-export async function listCoachRuns<TOutput = unknown>(
-  workspaceId: string,
-  limit = 10,
-): Promise<CoachRunRecord<TOutput>[]> {
-  const rows = await (await db()).query<{
-    id: number;
-    created_at: string;
-    model: string;
-    output: string;
-    usage: string | null;
-  }>(
-    `SELECT id, created_at, model, output, usage FROM coach_runs WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT $2`,
+export async function listCoachThreads(workspaceId: string, limit = 50): Promise<CoachThreadSummary[]> {
+  const rows = await (await db()).query<{ thread_id: number; title: string; started_at: string; last_at: string; turns: number }>(
+    `WITH runs AS (SELECT ${RUN_COLUMNS} FROM coach_runs WHERE workspace_id = $1)
+     SELECT thread_id,
+            (SELECT question FROM runs r2 WHERE r2.thread_id = r.thread_id ORDER BY id ASC LIMIT 1) AS title,
+            MIN(created_at) AS started_at, MAX(created_at) AS last_at, COUNT(*)::int AS turns
+     FROM runs r GROUP BY thread_id ORDER BY MAX(created_at) DESC, thread_id DESC LIMIT $2`,
     [workspaceId, limit],
   );
   return rows.map((r) => ({
-    id: Number(r.id),
-    createdAt: r.created_at,
-    model: r.model,
-    output: JSON.parse(r.output) as TOutput,
-    usage: r.usage ? (JSON.parse(r.usage) as Record<string, unknown>) : null,
+    threadId: Number(r.thread_id),
+    title: r.title ?? "",
+    startedAt: r.started_at,
+    lastAt: r.last_at,
+    turns: Number(r.turns),
   }));
+}
+
+/** All turns of one conversation, oldest first. Empty if the thread isn't this workspace's. */
+export async function listThreadRuns<TOutput = unknown>(workspaceId: string, threadId: number): Promise<CoachRunRecord<TOutput>[]> {
+  const rows = await (await db()).query<CoachRunRow>(
+    `SELECT ${RUN_COLUMNS} FROM coach_runs WHERE workspace_id = $1 AND COALESCE(thread_id, id) = $2 ORDER BY id ASC`,
+    [workspaceId, threadId],
+  );
+  return rows.map((r) => toRun<TOutput>(r));
+}
+
+export async function latestThreadId(workspaceId: string): Promise<number | null> {
+  const [row] = await (await db()).query<{ thread_id: number }>(
+    `SELECT COALESCE(thread_id, id) AS thread_id FROM coach_runs WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1`,
+    [workspaceId],
+  );
+  return row ? Number(row.thread_id) : null;
+}
+
+export async function deleteCoachThread(workspaceId: string, threadId: number): Promise<void> {
+  await (await db()).query(`DELETE FROM coach_runs WHERE workspace_id = $1 AND COALESCE(thread_id, id) = $2`, [workspaceId, threadId]);
 }

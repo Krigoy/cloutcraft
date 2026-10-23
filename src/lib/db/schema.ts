@@ -92,9 +92,18 @@ const TABLES = [
     model TEXT NOT NULL,
     input TEXT NOT NULL,
     output TEXT NOT NULL,
-    usage TEXT
+    usage TEXT,
+    thread_id INTEGER,
+    question TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS idx_coach_ws ON coach_runs (workspace_id, created_at)`,
+];
+
+/** Additive migrations for existing databases (all IF NOT EXISTS). */
+const MIGRATIONS = [
+  `ALTER TABLE coach_runs ADD COLUMN IF NOT EXISTS thread_id INTEGER`,
+  `ALTER TABLE coach_runs ADD COLUMN IF NOT EXISTS question TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_coach_thread ON coach_runs (workspace_id, thread_id, id)`,
 ];
 
 const TABLE_NAMES = [
@@ -111,5 +120,6 @@ const TABLE_NAMES = [
 
 export const SCHEMA_SQL: string[] = [
   ...TABLES,
+  ...MIGRATIONS,
   ...TABLE_NAMES.map((t) => `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY`),
 ];

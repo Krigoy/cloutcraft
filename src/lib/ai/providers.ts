@@ -86,12 +86,13 @@ export function providerChain(): ProviderConfig[] {
   const configured = AUTO_ORDER.map((id) => configs.find((c) => c.id === id)!).filter((c) => c.configured);
   const primary = e.COACH_PROVIDER === "auto" ? configured[0] : configs.find((c) => c.id === e.COACH_PROVIDER);
   if (!primary || !primary.configured) return [];
-  const expand = (c: ProviderConfig): ProviderConfig[] => [
-    c,
-    ...(c.extraModels ?? []).map((model) => ({ ...c, model, extraModels: undefined })),
-  ];
-  if (!e.COACH_FALLBACK) return expand(primary);
-  return [...expand(primary), ...configured.filter((c) => c.id !== primary.id).flatMap(expand)];
+  const alternates = (c: ProviderConfig): ProviderConfig[] =>
+    (c.extraModels ?? []).map((model) => ({ ...c, model, extraModels: undefined }));
+  if (!e.COACH_FALLBACK) return [primary, ...alternates(primary)];
+  // Other providers come before a provider's own alternate models: when one
+  // vendor is overloaded, a different vendor is the faster way to an answer.
+  const others = configured.filter((c) => c.id !== primary.id);
+  return [primary, ...others, ...alternates(primary), ...others.flatMap(alternates)];
 }
 
 export interface CoachAvailability {
@@ -117,6 +118,8 @@ export interface JsonCompletionRequest<T> {
   user: string;
   schema: ZodType<T>;
   schemaName: string;
+  /** Hard cap for this attempt, including retries. */
+  timeoutMs: number;
 }
 
 export interface JsonCompletionResult {
@@ -180,22 +183,28 @@ async function completeOpenAiCompatible<T>(
   };
   if (cfg.id === "groq" && /gpt-oss/.test(cfg.model)) body.reasoning_effort = groqReasoningEffort(e.COACH_EFFORT);
 
-  // Retry twice on overload / rate-limit: Gemini's free tier returns 503 in bursts.
-  const backoff = [1500, 3500];
+  // One quick retry on overload / rate-limit (Gemini's free tier 503s in
+  // bursts); further resilience comes from the next model in the chain.
+  // Every attempt is bounded so a hung upstream can't eat the whole budget.
+  const started = Date.now();
   let res: Response | undefined;
-  for (let attempt = 0; attempt <= backoff.length; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const remaining = req.timeoutMs - (Date.now() - started);
+    if (remaining < 3000) throw new ProviderError(cfg.id, "network", "out of time");
     try {
       res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
         body: JSON.stringify(body),
         cache: "no-store",
+        signal: AbortSignal.timeout(remaining),
       });
     } catch (err) {
-      throw new ProviderError(cfg.id, "network", err instanceof Error ? err.message : "request failed");
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      throw new ProviderError(cfg.id, "network", timedOut ? `no response within ${Math.round(req.timeoutMs / 1000)}s` : err instanceof Error ? err.message : "request failed");
     }
     if (res.status !== 503 && res.status !== 429) break;
-    if (attempt < backoff.length) await sleep(backoff[attempt]);
+    if (attempt === 0) await sleep(1500);
   }
   if (!res) throw new ProviderError(cfg.id, "network", "no response");
 
@@ -219,7 +228,7 @@ async function completeOpenAiCompatible<T>(
 
 async function completeAnthropic<T>(cfg: ProviderConfig, req: JsonCompletionRequest<T>): Promise<JsonCompletionResult> {
   const e = env();
-  const client = new Anthropic({ apiKey: e.ANTHROPIC_API_KEY });
+  const client = new Anthropic({ apiKey: e.ANTHROPIC_API_KEY, timeout: req.timeoutMs, maxRetries: 1 });
   try {
     const response = await client.messages.parse({
       model: cfg.model,

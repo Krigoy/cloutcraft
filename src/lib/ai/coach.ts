@@ -15,11 +15,20 @@ export class CoachError extends Error {
   }
 }
 
+/** An earlier turn of the same conversation, condensed. */
+export interface ConversationTurn {
+  question: string;
+  answer: string;
+  recommendations: string[];
+}
+
 export interface CoachInput {
   report: InsightReport;
   snapshots: Partial<Record<Platform, ChannelSnapshot>>;
-  /** Optional free-text from the creator: goals, niche, constraints. */
+  /** The creator's question or goal for this turn. */
   creatorNotes?: string;
+  /** Previous turns when this is a follow-up. */
+  conversation?: ConversationTurn[];
 }
 
 export interface CoachRunResult {
@@ -51,6 +60,7 @@ Rules:
 - Small samples (under ~8 items) support hypotheses, not conclusions. Route those into "experiments" rather than firm recommendations.
 - If "creatorNotes" contains a question or a goal (e.g. "how do I reach 1M subscribers"), that is the brief. Answer it first in "answer": size the goal against the report (current followers per platform, the window's growth, items per week), state the gap and what the present trajectory implies, give the strategic thesis for closing it, and an honest verdict — including when the goal is unrealistic on the current pace. Then make every recommendation and the 30-day plan a step toward that goal.
 - For any follower/subscriber timeline, use the precomputed "followerMilestones" (months to each milestone at 2%, 5% and 10% monthly growth) and say which rate the creator's recent growth resembles. Do not do compounding arithmetic yourself.
+- If "conversation" is present, this is a follow-up in an ongoing conversation: the earlier questions, answers and recommendation titles are given. Build on them — answer the new question directly, do not repeat recommendations already given unless you are revising them, and say what changes. If "creatorNotes" is empty on a follow-up, treat it as "update the plan with the latest data".
 - If "creatorNotes" is absent, set "answer" to an empty string.
 - Respond with a single JSON object that matches the provided schema exactly.`;
 
@@ -163,6 +173,7 @@ export function buildCoachPayload(input: CoachInput): unknown {
       detail: f.detail,
     })),
     creatorNotes: input.creatorNotes?.trim() || undefined,
+    conversation: input.conversation?.length ? input.conversation : undefined,
   };
 }
 
@@ -187,14 +198,25 @@ export async function runCoach(input: CoachInput): Promise<CoachRunResult> {
   const compactNote =
     "\n\nOutput budget is tight for this request: give exactly 3 recommendations, playbooks of 3 steps, 2 metrics each, 3 actions per week, and keep every string under 45 words. Every schema field is still required.";
   const failures: ProviderError[] = [];
+  // Whole chain must finish inside the coach route's maxDuration (120 s):
+  // a healthy plan takes 25–45 s, an overloaded upstream can hang, so each
+  // attempt is capped and late providers are skipped rather than started.
+  const deadline = Date.now() + 100_000;
+  const PER_ATTEMPT_MS = 45_000;
 
   for (const cfg of chain) {
+    const remaining = deadline - Date.now();
+    if (remaining < 8_000) {
+      failures.push(new ProviderError(cfg.id, "network", "skipped — out of time"));
+      break;
+    }
     try {
       const result = await completeJson(cfg, {
         system: SYSTEM_PROMPT,
         user: cfg.compact ? base + compactNote : base,
         schema: CoachReportSchema,
         schemaName: "growth_plan",
+        timeoutMs: Math.min(PER_ATTEMPT_MS, remaining),
       });
       let parsedJson: unknown;
       try {

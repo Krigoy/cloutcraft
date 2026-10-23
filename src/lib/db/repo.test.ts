@@ -147,11 +147,28 @@ describe("rates, coach runs and cleanup", () => {
     expect(await repo.getRateOverrides(A)).toEqual({});
   });
 
-  it("stores coach runs and returns their ids", async () => {
-    const id = await repo.saveCoachRun(A, { model: "gemini/x", input: { a: 1 }, output: { summary: "s" } });
-    const runs = await repo.listCoachRuns<{ summary: string }>(A);
-    expect(runs[0]).toMatchObject({ id, model: "gemini/x", output: { summary: "s" } });
-    expect(await repo.listCoachRuns(B)).toHaveLength(0);
+  it("stores coach runs as conversation threads", async () => {
+    const first = await repo.saveCoachRun(A, { model: "gemini/x", input: {}, output: { summary: "s1" }, question: "How do I grow?" });
+    expect(first.threadId).toBe(first.id);
+    const second = await repo.saveCoachRun(A, { model: "gemini/x", input: {}, output: { summary: "s2" }, question: "And Shorts?", threadId: first.threadId });
+    const other = await repo.saveCoachRun(A, { model: "groq/y", input: {}, output: { summary: "s3" } });
+
+    const threads = await repo.listCoachThreads(A);
+    expect(threads.map((x) => [x.threadId, x.title, x.turns])).toEqual([
+      [other.threadId, "", 1],
+      [first.threadId, "How do I grow?", 2],
+    ]);
+    const runs = await repo.listThreadRuns<{ summary: string }>(A, first.threadId);
+    expect(runs.map((r) => [r.id, r.question, r.output.summary])).toEqual([
+      [first.id, "How do I grow?", "s1"],
+      [second.id, "And Shorts?", "s2"],
+    ]);
+    expect(await repo.latestThreadId(A)).toBe(other.threadId);
+    expect(await repo.listThreadRuns(B, first.threadId)).toHaveLength(0); // other user can't read it
+    await repo.deleteCoachThread(B, first.threadId); // ...or delete it
+    expect(await repo.listThreadRuns(A, first.threadId)).toHaveLength(2);
+    await repo.deleteCoachThread(A, first.threadId);
+    expect((await repo.listCoachThreads(A)).map((x) => x.threadId)).toEqual([other.threadId]);
   });
 
   it("removes a connection and everything synced for it", async () => {
