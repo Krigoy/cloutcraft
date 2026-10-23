@@ -55,7 +55,12 @@ const schema = z.object({
   COACH_MAX_TOKENS: z.coerce.number().int().positive().default(16000),
 
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default("gemini-3.8-flash"),
+  GEMINI_MODEL: z.string().default("gemini-3.5-flash"),
+  /** Tried in order when GEMINI_MODEL is overloaded (Google's free tier 503s per model). */
+  GEMINI_FALLBACK_MODELS: z
+    .string()
+    .default("gemini-flash-latest,gemini-3.8-flash")
+    .transform((v) => v.split(",").map((m) => m.trim()).filter(Boolean)),
   GROQ_API_KEY: z.string().optional(),
   GROQ_MODEL: z.string().default("openai/gpt-oss-120b"),
   ANTHROPIC_API_KEY: z.string().optional(),

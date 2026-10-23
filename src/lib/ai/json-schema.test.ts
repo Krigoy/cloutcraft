@@ -15,7 +15,7 @@ describe("toJsonSchema", () => {
     expect(json.$schema).toBeUndefined();
     expect(json.type).toBe("object");
     expect(json.additionalProperties).toBe(false);
-    expect(json.required).toEqual(["answer", "summary", "strengths", "recommendations", "experiments", "caveats"]);
+    expect(json.required).toEqual(["answer", "summary", "strengths", "recommendations", "thirtyDayPlan", "experiments", "caveats"]);
     expect(json.properties.recommendations.type).toBe("array");
     expect(Object.keys(json.properties.recommendations.items?.properties ?? {})).toContain("evidence");
   });
@@ -32,11 +32,15 @@ describe("toJsonSchema", () => {
           priority: "high",
           effort: "low",
           rationale: "r",
-          action: "a",
+          mechanism: "m",
+          playbook: ["p1", "p2"],
           expectedImpact: "i",
+          metricsToWatch: ["CTR ≥ 6%"],
+          pitfall: "x",
           evidence: ["F1"],
         },
       ],
+      thirtyDayPlan: [{ week: 1, focus: "f", actions: ["a"] }],
       experiments: [{ hypothesis: "h", method: "m", successMetric: "s", durationWeeks: 2 }],
       caveats: [],
     };

@@ -1,7 +1,9 @@
+import { AlertTriangle, Gauge, ListChecks, Sparkles, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { CoachReport, Recommendation } from "@/lib/ai/schema";
+import { cn } from "@/lib/utils";
 
 const CATEGORY_LABEL: Record<Recommendation["category"], string> = {
   content_strategy: "Content strategy",
@@ -13,41 +15,59 @@ const CATEGORY_LABEL: Record<Recommendation["category"], string> = {
   cross_platform: "Cross-platform",
 };
 
-const PRIORITY_VARIANT: Record<Recommendation["priority"], "default" | "secondary" | "outline"> = {
-  high: "default",
-  medium: "secondary",
-  low: "outline",
+const PRIORITY: Record<Recommendation["priority"], { label: string; bar: string; badge: "default" | "secondary" | "outline" }> = {
+  high: { label: "High priority", bar: "border-l-critical", badge: "default" },
+  medium: { label: "Medium priority", bar: "border-l-warn", badge: "secondary" },
+  low: { label: "Low priority", bar: "border-l-muted-foreground/40", badge: "outline" },
 };
+
+function SectionLabel({ icon: Icon, children }: { icon: typeof Target; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+      <Icon className="size-3.5" />
+      {children}
+    </div>
+  );
+}
 
 export function CoachReportView({ report, question }: { report: CoachReport; question?: string }) {
   const answer = report.answer?.trim();
+  const plan = report.thirtyDayPlan ?? [];
+
   return (
     <div className="space-y-6">
       {question && (
-        <Card className="border-foreground/20">
+        <Card data-reveal className="relative isolate overflow-hidden border-foreground/15">
+          <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+            <span className="absolute -top-16 -left-10 size-56 rounded-full bg-twitch/25 blur-3xl" />
+            <span className="absolute -right-10 -bottom-20 size-56 rounded-full bg-tiktok/20 blur-3xl" />
+          </div>
           <CardHeader>
             <CardDescription>You asked</CardDescription>
-            <CardTitle className="text-base font-medium">“{question}”</CardTitle>
+            <CardTitle className="text-lg font-medium">“{question}”</CardTitle>
           </CardHeader>
           {answer && (
             <CardContent>
-              <p className="text-sm leading-relaxed">{answer}</p>
+              <p className="max-w-3xl text-[15px] leading-relaxed">{answer}</p>
             </CardContent>
           )}
         </Card>
       )}
-      <Card>
+
+      <Card data-reveal>
         <CardHeader>
           <CardTitle>Where you stand</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm leading-relaxed">{report.summary}</p>
+          <p className="max-w-3xl text-sm leading-relaxed">{report.summary}</p>
           {report.strengths.length > 0 && (
             <div>
-              <h3 className="mb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">What’s working</h3>
-              <ul className="list-disc space-y-1 pl-5 text-sm">
+              <SectionLabel icon={Sparkles}>What’s working</SectionLabel>
+              <ul className="mt-2 grid gap-2 sm:grid-cols-2">
                 {report.strengths.map((s) => (
-                  <li key={s}>{s}</li>
+                  <li key={s} className="rounded-lg border bg-background/60 px-3 py-2 text-sm">
+                    {s}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -55,51 +75,120 @@ export function CoachReportView({ report, question }: { report: CoachReport; que
         </CardContent>
       </Card>
 
-      <section className="space-y-3">
+      <section className="space-y-4">
         <h2 className="text-lg font-semibold tracking-tight">Recommendations</h2>
-        {report.recommendations.map((r, i) => (
-          <Card key={`${i}-${r.title}`}>
-            <CardHeader>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge variant={PRIORITY_VARIANT[r.priority]} className="capitalize">
-                  {r.priority} priority
-                </Badge>
-                <Badge variant="outline" className="font-normal">
-                  {CATEGORY_LABEL[r.category]}
-                </Badge>
-                <Badge variant="outline" className="font-normal text-muted-foreground">
-                  {r.effort} effort
-                </Badge>
-              </div>
-              <CardTitle className="text-base">{r.title}</CardTitle>
-              <CardDescription>{r.rationale}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div>
-                <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Do this</div>
-                <p className="mt-0.5">{r.action}</p>
-              </div>
-              <div>
-                <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Expected impact</div>
-                <p className="mt-0.5 text-muted-foreground">{r.expectedImpact}</p>
-              </div>
-              {r.evidence.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1">
-                  <span className="mr-1 text-xs text-muted-foreground">Evidence:</span>
-                  {r.evidence.map((e) => (
-                    <Badge key={e} variant="outline" className="font-mono text-[10px] font-normal text-muted-foreground">
-                      {e}
-                    </Badge>
-                  ))}
+        {report.recommendations.map((r, i) => {
+          const p = PRIORITY[r.priority];
+          return (
+            <Card key={`${i}-${r.title}`} data-reveal className={cn("border-l-4", p.bar)}>
+              <CardHeader>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-1 font-mono text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
+                  <Badge variant={p.badge}>{p.label}</Badge>
+                  <Badge variant="outline" className="font-normal">
+                    {CATEGORY_LABEL[r.category]}
+                  </Badge>
+                  <Badge variant="outline" className="font-normal text-muted-foreground">
+                    {r.effort} effort
+                  </Badge>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+                <CardTitle className="text-xl tracking-tight">{r.title}</CardTitle>
+                <CardDescription className="text-sm leading-relaxed">{r.rationale}</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-5 text-sm lg:grid-cols-[1.4fr_1fr]">
+                <div className="space-y-5">
+                  {r.mechanism && (
+                    <div>
+                      <SectionLabel icon={Gauge}>How it works</SectionLabel>
+                      <p className="mt-1.5 leading-relaxed">{r.mechanism}</p>
+                    </div>
+                  )}
+                  {r.playbook?.length > 0 && (
+                    <div>
+                      <SectionLabel icon={ListChecks}>Playbook</SectionLabel>
+                      <ol className="mt-2 space-y-2">
+                        {r.playbook.map((step, j) => (
+                          <li key={j} className="flex gap-3">
+                            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">
+                              {j + 1}
+                            </span>
+                            <span className="leading-relaxed">{step}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-4 rounded-xl border bg-background/60 p-4">
+                  <div>
+                    <SectionLabel icon={Target}>Expected impact</SectionLabel>
+                    <p className="mt-1.5 leading-relaxed">{r.expectedImpact}</p>
+                  </div>
+                  {r.metricsToWatch?.length > 0 && (
+                    <div>
+                      <SectionLabel icon={Gauge}>Metrics to watch</SectionLabel>
+                      <ul className="mt-1.5 space-y-1">
+                        {r.metricsToWatch.map((m) => (
+                          <li key={m} className="flex gap-2">
+                            <span className="mt-2 size-1.5 shrink-0 rounded-full bg-foreground" />
+                            <span className="tabular-nums">{m}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {r.pitfall && (
+                    <div className="rounded-lg border border-serious/40 bg-serious/10 p-3">
+                      <SectionLabel icon={AlertTriangle}>Pitfall</SectionLabel>
+                      <p className="mt-1 leading-relaxed">{r.pitfall}</p>
+                    </div>
+                  )}
+                  {r.evidence.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="mr-1 text-xs text-muted-foreground">Evidence</span>
+                      {r.evidence.map((e) => (
+                        <Badge key={e} variant="outline" className="font-mono text-[10px] font-normal text-muted-foreground">
+                          {e}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </section>
 
+      {plan.length > 0 && (
+        <Card data-reveal>
+          <CardHeader>
+            <CardTitle>The next 30 days</CardTitle>
+            <CardDescription>The recommendations as a schedule.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ol className="relative grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {plan.map((w) => (
+                <li key={w.week} className="relative rounded-xl border bg-background/60 p-4">
+                  <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Week {w.week}</div>
+                  <div className="mt-1 font-semibold tracking-tight">{w.focus}</div>
+                  <ul className="mt-3 space-y-1.5 text-sm">
+                    {w.actions.map((a) => (
+                      <li key={a} className="flex gap-2">
+                        <span className="mt-2 size-1.5 shrink-0 rounded-full bg-foreground/60" />
+                        <span className="leading-relaxed">{a}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      )}
+
       {report.experiments.length > 0 && (
-        <Card>
+        <Card data-reveal>
           <CardHeader>
             <CardTitle>Experiments to run</CardTitle>
             <CardDescription>Hypotheses the data hints at but can’t yet prove.</CardDescription>
@@ -130,7 +219,7 @@ export function CoachReportView({ report, question }: { report: CoachReport; que
       )}
 
       {report.caveats.length > 0 && (
-        <div className="rounded-lg border border-dashed p-4">
+        <div data-reveal className="rounded-lg border border-dashed p-4">
           <h3 className="mb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">Caveats</h3>
           <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
             {report.caveats.map((c) => (

@@ -42,6 +42,7 @@ export function CoachForm({
           id="notes"
           name="notes"
           rows={3}
+          className="bg-background/70 text-[15px]"
           placeholder="e.g. “How do I get to 1M YouTube subscribers?”, “Should I drop Shorts?”, “I can only film two days a week — what matters most?”"
           disabled={pending}
         />

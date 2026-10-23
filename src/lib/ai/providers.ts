@@ -21,6 +21,10 @@ export interface ProviderConfig {
   label: string;
   model: string;
   configured: boolean;
+  /** Same provider, other models to try after `model` (expanded by providerChain). */
+  extraModels?: string[];
+  /** Ask for a shorter plan: the provider's free tier cannot fit the full one. */
+  compact?: boolean;
   /** Where the request goes; shown in Settings so the privacy trade-off is visible. */
   note: string;
 }
@@ -46,6 +50,7 @@ export function providerConfigs(): ProviderConfig[] {
       id: "gemini",
       label: "Google Gemini",
       model: e.GEMINI_MODEL,
+      extraModels: e.GEMINI_FALLBACK_MODELS.filter((m) => m !== e.GEMINI_MODEL),
       configured: Boolean(e.GEMINI_API_KEY),
       note: "Free tier; prompts may be used to improve Google products outside the EEA/UK/CH.",
     },
@@ -54,7 +59,8 @@ export function providerConfigs(): ProviderConfig[] {
       label: "Groq",
       model: e.GROQ_MODEL,
       configured: Boolean(e.GROQ_API_KEY),
-      note: "Free tier; fast open-weight models, daily request caps.",
+      compact: true,
+      note: "Free tier (8k tokens/min): produces a condensed plan.",
     },
     {
       id: "anthropic",
@@ -80,8 +86,12 @@ export function providerChain(): ProviderConfig[] {
   const configured = AUTO_ORDER.map((id) => configs.find((c) => c.id === id)!).filter((c) => c.configured);
   const primary = e.COACH_PROVIDER === "auto" ? configured[0] : configs.find((c) => c.id === e.COACH_PROVIDER);
   if (!primary || !primary.configured) return [];
-  if (!e.COACH_FALLBACK) return [primary];
-  return [primary, ...configured.filter((c) => c.id !== primary.id)];
+  const expand = (c: ProviderConfig): ProviderConfig[] => [
+    c,
+    ...(c.extraModels ?? []).map((model) => ({ ...c, model, extraModels: undefined })),
+  ];
+  if (!e.COACH_FALLBACK) return expand(primary);
+  return [...expand(primary), ...configured.filter((c) => c.id !== primary.id).flatMap(expand)];
 }
 
 export interface CoachAvailability {
@@ -170,9 +180,10 @@ async function completeOpenAiCompatible<T>(
   };
   if (cfg.id === "groq" && /gpt-oss/.test(cfg.model)) body.reasoning_effort = groqReasoningEffort(e.COACH_EFFORT);
 
-  // One retry on overload / rate-limit: Gemini's free tier returns 503 in bursts.
+  // Retry twice on overload / rate-limit: Gemini's free tier returns 503 in bursts.
+  const backoff = [1500, 3500];
   let res: Response | undefined;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt <= backoff.length; attempt++) {
     try {
       res = await fetch(url, {
         method: "POST",
@@ -184,7 +195,7 @@ async function completeOpenAiCompatible<T>(
       throw new ProviderError(cfg.id, "network", err instanceof Error ? err.message : "request failed");
     }
     if (res.status !== 503 && res.status !== 429) break;
-    if (attempt === 0) await sleep(2000);
+    if (attempt < backoff.length) await sleep(backoff[attempt]);
   }
   if (!res) throw new ProviderError(cfg.id, "network", "no response");
 

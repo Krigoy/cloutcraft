@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import type { PageWithSearchParams } from "@/lib/search-params";
 import Link from "next/link";
 import { CoachForm } from "@/components/coach-form";
 import { CoachReportView } from "@/components/coach-report";
@@ -9,10 +8,11 @@ import { FindingCard } from "@/components/finding-card";
 import { Flash } from "@/components/flash";
 import { Reveal } from "@/components/motion/reveal";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { coachAvailability } from "@/lib/ai/providers";
 import type { CoachReport } from "@/lib/ai/schema";
 import { loadDashboard, parseWindow } from "@/lib/dashboard";
 import { listCoachRuns } from "@/lib/db/repo";
-import { coachAvailability } from "@/lib/ai/providers";
+import type { PageWithSearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Coach" };
@@ -40,39 +40,49 @@ export default async function CoachPage({ searchParams }: PageWithSearchParams) 
   return (
     <Reveal className="space-y-6">
       <Flash params={params} />
-      <div data-reveal className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Growth coach</h1>
-          <p className="text-sm text-muted-foreground">
-            Claude reads the findings below and turns them into a prioritised plan with evidence.
-          </p>
+
+      {/* Hero: ask the coach */}
+      <section
+        data-reveal
+        className="relative isolate overflow-hidden rounded-3xl border bg-card/60 px-6 py-8 backdrop-blur sm:px-10 sm:py-10"
+      >
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+          <span className="absolute -top-24 left-[5%] size-72 rounded-full bg-twitch/30 blur-3xl" />
+          <span className="absolute top-0 right-[8%] size-64 rounded-full bg-youtube/20 blur-3xl" />
+          <span className="absolute -bottom-24 left-[45%] size-64 rounded-full bg-tiktok/20 blur-3xl" />
         </div>
-        <WindowPicker base="/coach" params={params} current={windowDays} options={data.windowOptions} />
-      </div>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="max-w-2xl">
+            <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Growth coach</div>
+            <h1 className="hero-figure mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
+              Ask anything. Get a plan built on your numbers.
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {data.hasData
+                ? `Reads ${data.report.totals.items} items from the last ${windowDays} days and ${data.report.findings.length} findings, then answers with mechanisms, playbooks and a 30-day schedule.`
+                : "Connect a platform or install the demo data to give the coach something to work with."}
+            </p>
+          </div>
+          <WindowPicker base="/coach" params={params} current={windowDays} options={data.windowOptions} />
+        </div>
+        {data.hasData && (
+          <div className="mt-6 max-w-3xl">
+            <CoachForm
+              windowDays={windowDays}
+              enabled={enabled}
+              hasData={data.hasData}
+              disabledReason={availability.hint}
+              providerLabel={providerLabel}
+            />
+          </div>
+        )}
+      </section>
 
       {!data.hasData ? (
         <EmptyState connections={data.connections} />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="space-y-6">
-            <Card data-reveal>
-              <CardHeader>
-                <CardTitle>New plan</CardTitle>
-                <CardDescription>
-                  Based on {data.report.totals.items} items from the last {windowDays} days and {data.report.findings.length} findings.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <CoachForm
-                  windowDays={windowDays}
-                  enabled={enabled}
-                  hasData={data.hasData}
-                  disabledReason={availability.hint}
-                  providerLabel={providerLabel}
-                />
-              </CardContent>
-            </Card>
-
+          <div className="min-w-0">
             {selected ? (
               <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
@@ -87,7 +97,7 @@ export default async function CoachPage({ searchParams }: PageWithSearchParams) 
             ) : (
               <Card data-reveal className="border-dashed">
                 <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                  No plan yet. The findings on the right are what the coach will reason from.
+                  No plan yet. Ask a question above, or generate a plan with no question for a general review.
                 </CardContent>
               </Card>
             )}
@@ -126,7 +136,9 @@ export default async function CoachPage({ searchParams }: PageWithSearchParams) 
                         >
                           {timeFormat.format(new Date(r.createdAt))}
                           <span className="ml-2 text-xs text-muted-foreground">
-                            {r.output.recommendations.length} recommendations
+                            {typeof r.usage?.creatorNotes === "string" && r.usage.creatorNotes
+                              ? `“${r.usage.creatorNotes.slice(0, 40)}${r.usage.creatorNotes.length > 40 ? "…" : ""}”`
+                              : `${r.output.recommendations.length} recommendations`}
                           </span>
                         </Link>
                       </li>
