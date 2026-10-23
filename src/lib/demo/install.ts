@@ -2,7 +2,7 @@ import "server-only";
 import * as repo from "@/lib/db/repo";
 import { PLATFORMS, type Platform } from "@/lib/platforms/types";
 import { syncPlatform } from "@/lib/sync";
-import { backdatedViews, buildDemoData } from "./generate";
+import { backdatedViews, buildDemoData, demoLiveSamples } from "./generate";
 
 /**
  * Connect the three demo channels and seed a short metric history so the
@@ -35,6 +35,9 @@ export async function installDemo(workspaceId: string): Promise<void> {
   for (const platform of PLATFORMS) {
     await syncPlatform(workspaceId, platform);
   }
+
+  // Viewer curves for the latest Twitch streams, as if the scheduler had sampled them.
+  await repo.recordLiveSamples(workspaceId, demoLiveSamples(data.items));
 }
 
 export async function removeDemo(workspaceId: string): Promise<Platform[]> {

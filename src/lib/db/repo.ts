@@ -337,6 +337,39 @@ export async function recordLiveSample(workspaceId: string, sample: LiveSample):
   );
 }
 
+/** Bulk form of `recordLiveSample` (demo seeding, backfills). */
+export async function recordLiveSamples(workspaceId: string, samples: LiveSample[]): Promise<void> {
+  if (samples.length === 0) return;
+  const rows = samples.map((s) => ({
+    platform: s.platform,
+    stream_id: s.streamId,
+    captured_at: s.capturedAt,
+    viewer_count: s.viewerCount,
+    title: s.title ?? null,
+    started_at: s.startedAt ?? null,
+  }));
+  await (await db()).query(
+    `INSERT INTO live_samples (workspace_id, platform, stream_id, captured_at, viewer_count, title, started_at)
+     SELECT $1, r.platform, r.stream_id, r.captured_at, r.viewer_count, r.title, r.started_at
+     FROM jsonb_to_recordset($2::text::jsonb) AS r(platform text, stream_id text, captured_at text, viewer_count int, title text, started_at text)
+     ON CONFLICT (workspace_id, platform, stream_id, captured_at) DO UPDATE SET viewer_count = excluded.viewer_count`,
+    [workspaceId, JSON.stringify(rows)],
+  );
+}
+
+/** Every sample of one broadcast, oldest first. */
+export async function liveSamplesForStream(
+  workspaceId: string,
+  platform: Platform,
+  streamId: string,
+): Promise<{ capturedAt: string; viewerCount: number }[]> {
+  const rows = await (await db()).query<{ captured_at: string; viewer_count: number }>(
+    `SELECT captured_at, viewer_count FROM live_samples WHERE workspace_id = $1 AND platform = $2 AND stream_id = $3 ORDER BY captured_at`,
+    [workspaceId, platform, streamId],
+  );
+  return rows.map((r) => ({ capturedAt: r.captured_at, viewerCount: Number(r.viewer_count) }));
+}
+
 export interface LiveStreamStats {
   streamId: string;
   samples: number;

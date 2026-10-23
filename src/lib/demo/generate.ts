@@ -1,4 +1,4 @@
-import type { ChannelSnapshot, ContentItem } from "@/lib/platforms/types";
+import type { ChannelSnapshot, ContentItem, LiveSample } from "@/lib/platforms/types";
 
 /**
  * Deterministic demo data so the dashboard is fully explorable before any
@@ -246,6 +246,7 @@ export function buildDemoData(now = new Date()): DemoData {
       views: Math.round(avgViewers * rng.jitter(9, 0.35)),
       avgViewers,
       peakViewers: Math.round(avgViewers * rng.jitter(1.8, 0.2)),
+      streamId: id,
     });
   }
 
@@ -309,4 +310,45 @@ export function buildDemoData(now = new Date()): DemoData {
   ];
 
   return { snapshots, items };
+}
+
+/**
+ * Viewer-count samples for the most recent demo Twitch streams, so the
+ * streams page has curves to draw: a ramp over the first 15% of the
+ * broadcast, a gentle hump, a tail-off after 75%, mild noise. Each curve is
+ * rescaled so its mean matches the item's avgViewers and clipped at its peak.
+ */
+export function demoLiveSamples(items: ContentItem[], opts: { streams?: number; stepMinutes?: number } = {}): LiveSample[] {
+  const { streams = 8, stepMinutes = 5 } = opts;
+  const recent = items
+    .filter((i) => i.platform === "twitch" && i.kind === "live" && i.streamId && i.avgViewers)
+    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .slice(0, streams);
+  const out: LiveSample[] = [];
+  recent.forEach((item, idx) => {
+    const rng = makeRng(777 + idx);
+    const start = new Date(item.publishedAt).getTime();
+    const steps = Math.max(2, Math.floor(item.durationSec / 60 / stepMinutes));
+    const raw: number[] = [];
+    for (let k = 0; k <= steps; k++) {
+      const t = k / steps;
+      const ramp = Math.min(1, t / 0.15);
+      const tail = t > 0.75 ? 1 - ((t - 0.75) / 0.25) * 0.45 : 1;
+      const hump = 1 + 0.25 * Math.sin(Math.PI * t);
+      raw.push(ramp * tail * hump * rng.jitter(1, 0.08));
+    }
+    const mean = raw.reduce((a, b) => a + b, 0) / raw.length;
+    const scale = item.avgViewers! / mean;
+    raw.forEach((v, k) => {
+      out.push({
+        platform: "twitch",
+        streamId: item.streamId!,
+        capturedAt: new Date(start + k * stepMinutes * 60_000).toISOString(),
+        viewerCount: Math.min(item.peakViewers ?? Infinity, Math.max(0, Math.round(v * scale))),
+        title: item.title,
+        startedAt: item.publishedAt,
+      });
+    });
+  });
+  return out;
 }

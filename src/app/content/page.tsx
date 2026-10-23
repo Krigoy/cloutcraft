@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { PageWithSearchParams } from "@/lib/search-params";
+import { ContentTabs } from "@/components/content-tabs";
 import { ContentTable, type ContentRow } from "@/components/content-table";
 import { EmptyState } from "@/components/empty-state";
 import { FilterLinks, WindowPicker } from "@/components/filter-links";
@@ -82,7 +83,10 @@ export default async function ContentPage({ searchParams }: PageWithSearchParams
             {rows.length} items · {formatCompact(totalViews)} views · {formatUsd(totalMid)} estimated
           </p>
         </div>
-        <WindowPicker base="/content" params={params} current={windowDays} options={data.windowOptions} />
+        <div className="flex flex-wrap items-center gap-3">
+          <ContentTabs active="uploads" windowDays={windowDays} />
+          <WindowPicker base="/content" params={params} current={windowDays} options={data.windowOptions} />
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">

@@ -243,3 +243,20 @@ describe("payout reports", () => {
     expect(await repo.listPayoutReports(B)).toHaveLength(1);
   });
 });
+
+describe("live sample bulk writes", () => {
+  it("inserts many samples at once and reads one stream's curve in order", async () => {
+    await repo.recordLiveSamples(A, [
+      { platform: "twitch", streamId: "cur", capturedAt: "2026-10-20T20:10:00.000Z", viewerCount: 50 },
+      { platform: "twitch", streamId: "cur", capturedAt: "2026-10-20T20:00:00.000Z", viewerCount: 10, title: "t", startedAt: "2026-10-20T20:00:00.000Z" },
+      { platform: "twitch", streamId: "other", capturedAt: "2026-10-20T20:00:00.000Z", viewerCount: 99 },
+    ]);
+    await repo.recordLiveSamples(A, []); // no-op
+    expect(await repo.liveSamplesForStream(A, "twitch", "cur")).toEqual([
+      { capturedAt: "2026-10-20T20:00:00.000Z", viewerCount: 10 },
+      { capturedAt: "2026-10-20T20:10:00.000Z", viewerCount: 50 },
+    ]);
+    expect(await repo.liveSamplesForStream(B, "twitch", "cur")).toEqual([]);
+    expect((await repo.liveStatsByStream(A, "twitch")).get("cur")?.peakViewers).toBe(50);
+  });
+});
