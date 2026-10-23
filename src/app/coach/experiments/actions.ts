@@ -14,7 +14,8 @@ import { isPlatform, type ContentKind } from "@/lib/platforms/types";
 import { getWorkspaceId } from "@/lib/session";
 
 const KINDS: ContentKind[] = ["video", "short", "live"];
-const MAX_WEEKS = 26;
+const MIN_DAYS = 1;
+const MAX_DAYS = 26 * 7;
 
 function text(formData: FormData, key: string): string {
   const v = formData.get(key);
@@ -68,7 +69,11 @@ export async function startExperimentAction(formData: FormData): Promise<void> {
   const liftFraction = number(formData, "targetLift");
   const liftPercent = number(formData, "targetLiftPercent");
   const targetLift = Math.min(5, Math.max(0.01, liftFraction ?? (liftPercent !== undefined ? liftPercent / 100 : 0.2)));
-  const weeks = Math.min(MAX_WEEKS, Math.max(1, Math.round(number(formData, "durationWeeks") ?? 4)));
+  // Duration: the manual form sends a value + unit (days/weeks); the coach's Track button sends weeks.
+  const durationValue = number(formData, "durationValue");
+  const unit = text(formData, "durationUnit") === "days" ? 1 : 7;
+  const requestedDays = durationValue !== undefined ? durationValue * unit : (number(formData, "durationWeeks") ?? 4) * 7;
+  const days = Math.min(MAX_DAYS, Math.max(MIN_DAYS, Math.round(requestedDays)));
 
   const runId = number(formData, "runId");
   const index = number(formData, "index");
@@ -81,7 +86,7 @@ export async function startExperimentAction(formData: FormData): Promise<void> {
     segment,
     targetLift,
     startedAt: now.toISOString(),
-    endsAt: new Date(now.getTime() + weeks * 7 * 86_400_000).toISOString(),
+    endsAt: new Date(now.getTime() + days * 86_400_000).toISOString(),
     source: runId && index !== undefined ? { runId, index } : undefined,
   });
   revalidatePath("/coach", "layout");

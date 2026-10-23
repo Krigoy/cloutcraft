@@ -86,10 +86,20 @@ export function ExperimentForm({ windowDays }: { windowDays: number }) {
               <Input id="exp-lift" name="targetLiftPercent" type="number" min={1} max={500} defaultValue={20} inputMode="numeric" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="exp-weeks">Run for (weeks)</Label>
-              <Input id="exp-weeks" name="durationWeeks" type="number" min={1} max={26} defaultValue={4} inputMode="numeric" />
+              <Label htmlFor="exp-duration">Run for</Label>
+              <div className="grid grid-cols-[1fr_auto] gap-1.5">
+                <Input id="exp-duration" name="durationValue" type="number" min={1} max={182} defaultValue={4} inputMode="numeric" required />
+                <NativeSelect name="durationUnit" defaultValue="weeks" aria-label="Duration unit" className="w-24">
+                  <option value="days">days</option>
+                  <option value="weeks">weeks</option>
+                </NativeSelect>
+              </div>
             </div>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Anything from a day to six months. A verdict needs at least 3 uploads in the test, so a one- or two-day run only shows a result if you post that
+            much inside it; scores refresh after each sync.
+          </p>
           <Button type="submit" className="w-full">
             Start tracking
           </Button>
