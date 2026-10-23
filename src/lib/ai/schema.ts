@@ -42,11 +42,28 @@ export const RecommendationSchema = z.object({
     .describe("Finding ids (e.g. 'F3') or specific metrics from the report that support this."),
 });
 
+/**
+ * How the app should score an experiment from synced data: the segment of
+ * uploads that counts as the treatment, the metric, and the lift that counts
+ * as a win. Fields are nullable rather than optional so every provider's
+ * strict JSON-schema mode accepts the shape.
+ */
+export const ExperimentTrackingSchema = z.object({
+  platform: z.enum(["youtube", "twitch", "tiktok"]).nullable(),
+  kind: z.enum(["video", "short", "live"]).nullable(),
+  weekdays: z.array(z.number()).nullable().describe("Publish weekdays that define the treatment, 0 = Sunday … 6 = Saturday; null when timing is not what is being tested."),
+  minDurationSec: z.number().nullable(),
+  maxDurationSec: z.number().nullable(),
+  metric: z.enum(["median_views", "median_engagement", "earnings_per_item", "uploads_per_week"]),
+  targetLift: z.number().describe("Fractional improvement over the baseline that counts as success, e.g. 0.2 for +20%."),
+});
+
 export const ExperimentSchema = z.object({
   hypothesis: z.string(),
   method: z.string().describe("How to run the test with the creator's actual content."),
   successMetric: z.string(),
   durationWeeks: z.number(),
+  tracking: ExperimentTrackingSchema,
 });
 
 export const WeekPlanSchema = z.object({
@@ -71,5 +88,6 @@ export const CoachReportSchema = z.object({
 
 export type Recommendation = z.infer<typeof RecommendationSchema>;
 export type Experiment = z.infer<typeof ExperimentSchema>;
+export type ExperimentTracking = z.infer<typeof ExperimentTrackingSchema>;
 export type WeekPlan = z.infer<typeof WeekPlanSchema>;
 export type CoachReport = z.infer<typeof CoachReportSchema>;

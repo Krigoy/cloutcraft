@@ -97,6 +97,24 @@ const TABLES = [
     question TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS idx_coach_ws ON coach_runs (workspace_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS experiments (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    title TEXT NOT NULL,
+    method TEXT,
+    success_metric TEXT,
+    metric TEXT NOT NULL,
+    segment TEXT NOT NULL,
+    target_lift DOUBLE PRECISION NOT NULL,
+    started_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    closed_at TEXT,
+    source_run_id INTEGER,
+    source_index INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_experiments_ws ON experiments (workspace_id, status, started_at)`,
 ];
 
 /** Additive migrations for existing databases (all IF NOT EXISTS). */
@@ -116,6 +134,7 @@ const TABLE_NAMES = [
   "oauth_states",
   "rate_overrides",
   "coach_runs",
+  "experiments",
 ];
 
 export const SCHEMA_SQL: string[] = [

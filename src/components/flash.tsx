@@ -19,6 +19,10 @@ export function Flash({ params }: { params: SearchParams }) {
   if (first(params.disconnected)) messages.push("Connection removed along with its data.");
   if (first(params.rates) === "saved") messages.push("Payout assumptions saved.");
   if (first(params.rates) === "reset") messages.push("Payout assumptions reset to defaults.");
+  if (first(params.experiment) === "started") messages.push("Experiment started. It is scored against your baseline after every sync.");
+  if (first(params.experiment) === "closed") messages.push("Experiment closed.");
+  if (first(params.experiment) === "reopened") messages.push("Experiment reopened.");
+  if (first(params.experiment) === "deleted") messages.push("Experiment deleted.");
 
   if (!error && messages.length === 0) return null;
   return (

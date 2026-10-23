@@ -1,5 +1,6 @@
-import { MessageSquare, Plus, Trash2 } from "lucide-react";
+import { FlaskConical, MessageSquare, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import type { CoachThreadSummary } from "@/lib/db/repo";
 import { cn } from "@/lib/utils";
@@ -24,12 +25,18 @@ export function CoachSidebar({
   activeThreadId,
   windowDays,
   now,
+  section = "conversations",
+  activeExperiments = 0,
 }: {
   threads: CoachThreadSummary[];
   activeThreadId: number | null;
   windowDays: number;
   now: Date;
+  /** Which coach page is open, so the right entry is highlighted. */
+  section?: "conversations" | "experiments";
+  activeExperiments?: number;
 }) {
+  const onExperiments = section === "experiments";
   const groups: { label: string; items: CoachThreadSummary[] }[] = [];
   for (const t of threads) {
     const label = groupLabel(t.lastAt, now);
@@ -42,10 +49,26 @@ export function CoachSidebar({
     <nav aria-label="Past conversations" className="flex h-full flex-col gap-3">
       <Link
         href={`/coach?window=${windowDays}&thread=new`}
-        className={cn(buttonVariants({ variant: activeThreadId === null ? "default" : "outline" }), "w-full justify-start gap-2")}
+        className={cn(buttonVariants({ variant: !onExperiments && activeThreadId === null ? "default" : "outline" }), "w-full justify-start gap-2")}
       >
         <Plus className="size-4" />
         New conversation
+      </Link>
+      <Link
+        href={`/coach/experiments?window=${windowDays}`}
+        aria-current={onExperiments ? "page" : undefined}
+        className={cn(
+          "flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-accent",
+          onExperiments ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
+        )}
+      >
+        <FlaskConical className="size-3.5 opacity-70" />
+        Experiments
+        {activeExperiments > 0 && (
+          <Badge variant="secondary" className="ml-auto h-5 min-w-5 justify-center px-1.5 tabular-nums">
+            {activeExperiments}
+          </Badge>
+        )}
       </Link>
 
       {threads.length === 0 ? (

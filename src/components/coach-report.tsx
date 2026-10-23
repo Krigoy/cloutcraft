@@ -1,9 +1,49 @@
-import { AlertTriangle, Gauge, ListChecks, Sparkles, Target } from "lucide-react";
+import { AlertTriangle, Check, FlaskConical, Gauge, ListChecks, Sparkles, Target } from "lucide-react";
+import Link from "next/link";
+import { startExperimentAction } from "@/app/coach/experiments/actions";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { CoachReport, Recommendation } from "@/lib/ai/schema";
+import type { CoachReport, Experiment, Recommendation } from "@/lib/ai/schema";
+import { describeSegment } from "@/lib/experiments/score";
 import { cn } from "@/lib/utils";
+
+/** Hidden fields that let `startExperimentAction` recreate the coach's tracking spec. */
+function TrackFields({ x, index, runId, windowDays }: { x: Experiment; index: number; runId: number; windowDays: number }) {
+  const t = x.tracking;
+  return (
+    <>
+      <input type="hidden" name="window" value={windowDays} />
+      <input type="hidden" name="runId" value={runId} />
+      <input type="hidden" name="index" value={index} />
+      <input type="hidden" name="title" value={x.hypothesis} />
+      <input type="hidden" name="method" value={x.method} />
+      <input type="hidden" name="successMetric" value={x.successMetric} />
+      <input type="hidden" name="durationWeeks" value={x.durationWeeks} />
+      <input type="hidden" name="metric" value={t.metric} />
+      <input type="hidden" name="targetLift" value={t.targetLift} />
+      {t.platform && <input type="hidden" name="platform" value={t.platform} />}
+      {t.kind && <input type="hidden" name="kind" value={t.kind} />}
+      {t.weekdays?.length ? <input type="hidden" name="weekdays" value={t.weekdays.join(",")} /> : null}
+      {t.minDurationSec !== null && <input type="hidden" name="minDurationSec" value={t.minDurationSec} />}
+      {t.maxDurationSec !== null && <input type="hidden" name="maxDurationSec" value={t.maxDurationSec} />}
+    </>
+  );
+}
+
+/** Segment chips for an experiment that carries a tracking spec (older plans don't). */
+function trackingSegment(x: Experiment) {
+  const t = x.tracking;
+  if (!t) return null;
+  return {
+    platform: t.platform ?? undefined,
+    kind: t.kind ?? undefined,
+    weekdays: t.weekdays ?? undefined,
+    minDurationSec: t.minDurationSec ?? undefined,
+    maxDurationSec: t.maxDurationSec ?? undefined,
+  };
+}
 
 const CATEGORY_LABEL: Record<Recommendation["category"], string> = {
   content_strategy: "Content strategy",
@@ -30,9 +70,24 @@ function SectionLabel({ icon: Icon, children }: { icon: typeof Target; children:
   );
 }
 
-export function CoachReportView({ report, question }: { report: CoachReport; question?: string }) {
+export function CoachReportView({
+  report,
+  question,
+  runId,
+  windowDays,
+  tracked,
+}: {
+  report: CoachReport;
+  question?: string;
+  /** With `windowDays`, enables the "Track" button on experiments. */
+  runId?: number;
+  windowDays?: number;
+  /** Indices of this run's experiments that are already being tracked. */
+  tracked?: ReadonlySet<number>;
+}) {
   const answer = report.answer?.trim();
   const plan = report.thirtyDayPlan ?? [];
+  const canTrack = runId !== undefined && windowDays !== undefined;
 
   return (
     <div className="space-y-6">
@@ -191,7 +246,18 @@ export function CoachReportView({ report, question }: { report: CoachReport; que
         <Card data-reveal>
           <CardHeader>
             <CardTitle>Experiments to run</CardTitle>
-            <CardDescription>Hypotheses the data hints at but can’t yet prove.</CardDescription>
+            <CardDescription>
+              Hypotheses the data hints at but can’t yet prove.{" "}
+              {canTrack && (
+                <>
+                  Press Track and CloutCraft scores it against your baseline after every sync —{" "}
+                  <Link href={`/coach/experiments?window=${windowDays}`} className="underline underline-offset-4 hover:text-foreground">
+                    see all experiments
+                  </Link>
+                  .
+                </>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent className="px-0">
             <Table>
@@ -201,17 +267,60 @@ export function CoachReportView({ report, question }: { report: CoachReport; que
                   <TableHead>How</TableHead>
                   <TableHead>Success looks like</TableHead>
                   <TableHead className="text-right">Weeks</TableHead>
+                  {canTrack && <TableHead className="w-24" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {report.experiments.map((x) => (
-                  <TableRow key={x.hypothesis}>
-                    <TableCell className="max-w-xs whitespace-normal font-medium">{x.hypothesis}</TableCell>
-                    <TableCell className="max-w-sm whitespace-normal text-muted-foreground">{x.method}</TableCell>
-                    <TableCell className="max-w-xs whitespace-normal text-muted-foreground">{x.successMetric}</TableCell>
-                    <TableCell className="text-right tabular-nums">{x.durationWeeks}</TableCell>
-                  </TableRow>
-                ))}
+                {report.experiments.map((x, i) => {
+                  const segment = trackingSegment(x);
+                  const isTracked = tracked?.has(i) ?? false;
+                  return (
+                    <TableRow key={`${i}-${x.hypothesis}`}>
+                      <TableCell className="max-w-xs whitespace-normal">
+                        <div className="font-medium">{x.hypothesis}</div>
+                        {segment && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {describeSegment(segment).map((part) => (
+                              <Badge key={part} variant="outline" className="h-4 px-1.5 text-[10px] font-normal text-muted-foreground">
+                                {part}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-sm whitespace-normal text-muted-foreground">{x.method}</TableCell>
+                      <TableCell className="max-w-xs whitespace-normal text-muted-foreground">{x.successMetric}</TableCell>
+                      <TableCell className="text-right tabular-nums">{x.durationWeeks}</TableCell>
+                      {canTrack && (
+                        <TableCell className="text-right">
+                          {isTracked ? (
+                            <Link
+                              href={`/coach/experiments?window=${windowDays}`}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-good hover:underline"
+                            >
+                              <Check className="size-3.5" /> Tracking
+                            </Link>
+                          ) : segment ? (
+                            <form action={startExperimentAction}>
+                              <TrackFields x={x} index={i} runId={runId} windowDays={windowDays} />
+                              <Button type="submit" size="sm" variant="outline" className="gap-1.5">
+                                <FlaskConical /> Track
+                              </Button>
+                            </form>
+                          ) : (
+                            <Link
+                              href={`/coach/experiments?window=${windowDays}`}
+                              className="text-xs text-muted-foreground hover:underline"
+                              title="This plan predates automatic tracking; define the experiment manually."
+                            >
+                              Define
+                            </Link>
+                          )}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent>

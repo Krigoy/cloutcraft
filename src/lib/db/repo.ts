@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { env } from "@/lib/env";
+import type { ExperimentMetric, ExperimentSegment, ExperimentStatus } from "@/lib/experiments/score";
 import type {
   ChannelSnapshot,
   ContentItem,
@@ -621,4 +622,117 @@ export async function latestThreadId(workspaceId: string): Promise<number | null
 
 export async function deleteCoachThread(workspaceId: string, threadId: number): Promise<void> {
   await (await db()).query(`DELETE FROM coach_runs WHERE workspace_id = $1 AND COALESCE(thread_id, id) = $2`, [workspaceId, threadId]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Experiments                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface ExperimentRecord {
+  id: number;
+  createdAt: string;
+  title: string;
+  method: string | null;
+  successMetric: string | null;
+  metric: ExperimentMetric;
+  segment: ExperimentSegment;
+  targetLift: number;
+  startedAt: string;
+  endsAt: string;
+  status: ExperimentStatus;
+  closedAt: string | null;
+  /** Coach run and experiment index this was started from, if any. */
+  source: { runId: number; index: number } | null;
+}
+
+interface ExperimentRow {
+  [key: string]: unknown;
+  id: number;
+  created_at: string;
+  title: string;
+  method: string | null;
+  success_metric: string | null;
+  metric: ExperimentMetric;
+  segment: string;
+  target_lift: number;
+  started_at: string;
+  ends_at: string;
+  status: ExperimentStatus;
+  closed_at: string | null;
+  source_run_id: number | null;
+  source_index: number | null;
+}
+
+function toExperiment(r: ExperimentRow): ExperimentRecord {
+  return {
+    id: Number(r.id),
+    createdAt: r.created_at,
+    title: r.title,
+    method: r.method,
+    successMetric: r.success_metric,
+    metric: r.metric,
+    segment: JSON.parse(r.segment) as ExperimentSegment,
+    targetLift: Number(r.target_lift),
+    startedAt: r.started_at,
+    endsAt: r.ends_at,
+    status: r.status,
+    closedAt: r.closed_at,
+    source: r.source_run_id !== null ? { runId: Number(r.source_run_id), index: Number(r.source_index) } : null,
+  };
+}
+
+export async function createExperiment(
+  workspaceId: string,
+  input: {
+    title: string;
+    method?: string;
+    successMetric?: string;
+    metric: ExperimentMetric;
+    segment: ExperimentSegment;
+    targetLift: number;
+    startedAt: string;
+    endsAt: string;
+    source?: { runId: number; index: number };
+  },
+): Promise<number> {
+  const [row] = await (await db()).query<{ id: number }>(
+    `INSERT INTO experiments (workspace_id, created_at, title, method, success_metric, metric, segment, target_lift, started_at, ends_at, status, source_run_id, source_index)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', $11, $12) RETURNING id`,
+    [
+      workspaceId,
+      new Date().toISOString(),
+      input.title.trim(),
+      input.method?.trim() || null,
+      input.successMetric?.trim() || null,
+      input.metric,
+      JSON.stringify(input.segment),
+      input.targetLift,
+      input.startedAt,
+      input.endsAt,
+      input.source?.runId ?? null,
+      input.source?.index ?? null,
+    ],
+  );
+  return Number(row.id);
+}
+
+/** Active first (soonest to finish on top), then closed ones newest first. */
+export async function listExperiments(workspaceId: string): Promise<ExperimentRecord[]> {
+  const rows = await (await db()).query<ExperimentRow>(
+    `SELECT * FROM experiments WHERE workspace_id = $1
+     ORDER BY (status = 'active') DESC, CASE WHEN status = 'active' THEN ends_at END ASC, COALESCE(closed_at, created_at) DESC, id DESC`,
+    [workspaceId],
+  );
+  return rows.map(toExperiment);
+}
+
+export async function setExperimentStatus(workspaceId: string, id: number, status: ExperimentStatus): Promise<void> {
+  await (await db()).query(
+    `UPDATE experiments SET status = $1, closed_at = $2 WHERE workspace_id = $3 AND id = $4`,
+    [status, status === "active" ? null : new Date().toISOString(), workspaceId, id],
+  );
+}
+
+export async function deleteExperiment(workspaceId: string, id: number): Promise<void> {
+  await (await db()).query(`DELETE FROM experiments WHERE workspace_id = $1 AND id = $2`, [workspaceId, id]);
 }

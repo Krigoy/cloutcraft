@@ -41,7 +41,15 @@ describe("toJsonSchema", () => {
         },
       ],
       thirtyDayPlan: [{ week: 1, focus: "f", actions: ["a"] }],
-      experiments: [{ hypothesis: "h", method: "m", successMetric: "s", durationWeeks: 2 }],
+      experiments: [
+        {
+          hypothesis: "h",
+          method: "m",
+          successMetric: "s",
+          durationWeeks: 2,
+          tracking: { platform: "tiktok", kind: null, weekdays: [5], minDurationSec: 60, maxDurationSec: null, metric: "median_views", targetLift: 0.2 },
+        },
+      ],
       caveats: [],
     };
     expect(CoachReportSchema.safeParse(sample).success).toBe(true);

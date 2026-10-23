@@ -180,3 +180,47 @@ describe("rates, coach runs and cleanup", () => {
     expect(await repo.listContentItems(B)).toHaveLength(1);
   });
 });
+
+describe("experiments", () => {
+  it("creates, lists, closes and deletes per workspace", async () => {
+    const running = await repo.createExperiment(A, {
+      title: "Friday TikToks",
+      metric: "median_views",
+      segment: { platform: "tiktok", weekdays: [5] },
+      targetLift: 0.2,
+      startedAt: "2026-10-01T00:00:00.000Z",
+      endsAt: "2026-10-29T00:00:00.000Z",
+      source: { runId: 7, index: 0 },
+    });
+    const sooner = await repo.createExperiment(A, {
+      title: "Longer videos",
+      method: "Cut nothing under 10 min",
+      metric: "earnings_per_item",
+      segment: { platform: "youtube", kind: "video", minDurationSec: 600 },
+      targetLift: 0.15,
+      startedAt: "2026-10-01T00:00:00.000Z",
+      endsAt: "2026-10-15T00:00:00.000Z",
+    });
+    await repo.createExperiment(B, { title: "Bob's", metric: "uploads_per_week", segment: {}, targetLift: 0.1, startedAt: "2026-10-01T00:00:00.000Z", endsAt: "2026-11-01T00:00:00.000Z" });
+
+    let list = await repo.listExperiments(A);
+    expect(list.map((x) => x.id)).toEqual([sooner, running]); // active ones, soonest to finish first
+    expect(list[1].segment).toEqual({ platform: "tiktok", weekdays: [5] });
+    expect(list[1].source).toEqual({ runId: 7, index: 0 });
+    expect(list[0].source).toBeNull();
+
+    await repo.setExperimentStatus(A, sooner, "won");
+    list = await repo.listExperiments(A);
+    expect(list.map((x) => [x.id, x.status])).toEqual([
+      [running, "active"],
+      [sooner, "won"],
+    ]);
+    expect(list[1].closedAt).toBeTruthy();
+
+    await repo.deleteExperiment(B, running); // not Bob's → no-op
+    expect(await repo.listExperiments(A)).toHaveLength(2);
+    await repo.deleteExperiment(A, running);
+    expect((await repo.listExperiments(A)).map((x) => x.id)).toEqual([sooner]);
+    expect(await repo.listExperiments(B)).toHaveLength(1);
+  });
+});
