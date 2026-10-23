@@ -22,6 +22,19 @@ export async function installDemo(workspaceId: string): Promise<void> {
     });
   }
 
+  // Follower history (the demo channels grow at different monthly rates) so goals have a pace to project from.
+  const monthlyGrowth: Record<Platform, number> = { youtube: 0.035, twitch: 0.02, tiktok: 0.06 };
+  for (const daysBack of [90, 60, 30, 7]) {
+    for (const snapshot of data.snapshots) {
+      const followers = Math.round((snapshot.followers ?? 0) / Math.pow(1 + monthlyGrowth[snapshot.platform], daysBack / 30.44));
+      await repo.saveSnapshot(workspaceId, {
+        ...snapshot,
+        followers,
+        capturedAt: new Date(now.getTime() - daysBack * 86_400_000).toISOString(),
+      });
+    }
+  }
+
   // Backdated snapshots first so they sort before the live one.
   for (const daysBack of [7, 1]) {
     const capturedAt = new Date(now.getTime() - daysBack * 86_400_000).toISOString();

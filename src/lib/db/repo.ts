@@ -4,6 +4,7 @@ import { decrypt, encrypt } from "@/lib/crypto";
 import { env } from "@/lib/env";
 import type { PayoutReport } from "@/lib/earnings/estimate";
 import type { ExperimentMetric, ExperimentSegment, ExperimentStatus } from "@/lib/experiments/score";
+import type { GoalMetric, GoalRecord, GoalStatus, HistoryPoint } from "@/lib/goals";
 import type {
   ChannelSnapshot,
   ContentItem,
@@ -227,6 +228,21 @@ export async function latestSnapshots(workspaceId: string): Promise<Partial<Reco
   for (const row of rows) {
     const snap = JSON.parse(row.data) as ChannelSnapshot;
     out[snap.platform] = snap;
+  }
+  return out;
+}
+
+/** Follower counts over time per platform (for goal pacing), oldest first. */
+export async function followerHistory(workspaceId: string, sinceIso: string): Promise<Partial<Record<Platform, HistoryPoint[]>>> {
+  const rows = await (await db()).query<{ platform: Platform; captured_at: string; followers: number | null }>(
+    `SELECT platform, captured_at, (data::jsonb->>'followers')::float8 AS followers FROM channel_snapshots
+     WHERE workspace_id = $1 AND captured_at >= $2 ORDER BY platform, captured_at`,
+    [workspaceId, sinceIso],
+  );
+  const out: Partial<Record<Platform, HistoryPoint[]>> = {};
+  for (const r of rows) {
+    if (r.followers === null) continue;
+    (out[r.platform] ??= []).push({ capturedAt: r.captured_at, value: Number(r.followers) });
   }
   return out;
 }
@@ -818,4 +834,65 @@ export async function listPayoutReports(workspaceId: string): Promise<PayoutRepo
 
 export async function deletePayoutReport(workspaceId: string, id: number): Promise<void> {
   await (await db()).query(`DELETE FROM payout_reports WHERE workspace_id = $1 AND id = $2`, [workspaceId, id]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Goals                                                               */
+/* ------------------------------------------------------------------ */
+
+interface GoalRow {
+  [key: string]: unknown;
+  id: number;
+  platform: Platform | null;
+  metric: GoalMetric;
+  target: number;
+  target_date: string;
+  status: GoalStatus;
+  created_at: string;
+  reached_at: string | null;
+}
+
+const toGoal = (r: GoalRow): GoalRecord => ({
+  id: Number(r.id),
+  platform: r.platform,
+  metric: r.metric,
+  target: Number(r.target),
+  targetDate: r.target_date,
+  status: r.status,
+  createdAt: r.created_at,
+  reachedAt: r.reached_at,
+});
+
+export async function createGoal(
+  workspaceId: string,
+  input: { platform: Platform | null; metric: GoalMetric; target: number; targetDate: string },
+): Promise<number> {
+  const [row] = await (await db()).query<{ id: number }>(
+    `INSERT INTO goals (workspace_id, platform, metric, target, target_date, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, 'active', $6) RETURNING id`,
+    [workspaceId, input.platform, input.metric, input.target, input.targetDate, new Date().toISOString()],
+  );
+  return Number(row.id);
+}
+
+/** Active goals by deadline, then the rest newest first. */
+export async function listGoals(workspaceId: string): Promise<GoalRecord[]> {
+  const rows = await (await db()).query<GoalRow>(
+    `SELECT * FROM goals WHERE workspace_id = $1
+     ORDER BY (status = 'active') DESC, CASE WHEN status = 'active' THEN target_date END ASC, id DESC`,
+    [workspaceId],
+  );
+  return rows.map(toGoal);
+}
+
+export async function setGoalStatus(workspaceId: string, id: number, status: GoalStatus): Promise<void> {
+  await (await db()).query(
+    `UPDATE goals SET status = $1, reached_at = CASE WHEN $1 = 'reached' THEN COALESCE(reached_at, $2) ELSE reached_at END
+     WHERE workspace_id = $3 AND id = $4`,
+    [status, new Date().toISOString(), workspaceId, id],
+  );
+}
+
+export async function deleteGoal(workspaceId: string, id: number): Promise<void> {
+  await (await db()).query(`DELETE FROM goals WHERE workspace_id = $1 AND id = $2`, [workspaceId, id]);
 }

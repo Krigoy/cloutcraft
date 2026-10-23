@@ -21,6 +21,9 @@ export function Flash({ params }: { params: SearchParams }) {
   if (first(params.rates) === "reset") messages.push("Payout assumptions reset to defaults.");
   if (first(params.payout) === "saved") messages.push("Payout saved. Estimates for that platform are now calibrated to it.");
   if (first(params.payout) === "deleted") messages.push("Payout removed.");
+  if (first(params.goal) === "saved") messages.push("Goal set. Its pace updates after every sync.");
+  if (first(params.goal) === "updated") messages.push("Goal updated.");
+  if (first(params.goal) === "deleted") messages.push("Goal removed.");
   if (first(params.experiment) === "started") messages.push("Experiment started. It is scored against your baseline after every sync.");
   if (first(params.experiment) === "closed") messages.push("Experiment closed.");
   if (first(params.experiment) === "reopened") messages.push("Experiment reopened.");

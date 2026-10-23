@@ -260,3 +260,33 @@ describe("live sample bulk writes", () => {
     expect((await repo.liveStatsByStream(A, "twitch")).get("cur")?.peakViewers).toBe(50);
   });
 });
+
+describe("goals and follower history", () => {
+  it("reads follower history from snapshots and manages goals per workspace", async () => {
+    await repo.saveSnapshot(A, { platform: "tiktok", capturedAt: "2026-09-01T00:00:00.000Z", displayName: "x", followers: 1000 });
+    await repo.saveSnapshot(A, { platform: "tiktok", capturedAt: "2026-10-01T00:00:00.000Z", displayName: "x", followers: 1200 });
+    await repo.saveSnapshot(A, { platform: "tiktok", capturedAt: "2026-07-01T00:00:00.000Z", displayName: "x", followers: 500 }); // before `since`
+    await repo.saveSnapshot(B, { platform: "tiktok", capturedAt: "2026-10-01T00:00:00.000Z", displayName: "y", followers: 9 });
+    const history = await repo.followerHistory(A, "2026-08-01T00:00:00.000Z");
+    expect(history.tiktok).toEqual([
+      { capturedAt: "2026-09-01T00:00:00.000Z", value: 1000 },
+      { capturedAt: "2026-10-01T00:00:00.000Z", value: 1200 },
+    ]);
+
+    const later = await repo.createGoal(A, { platform: "tiktok", metric: "followers", target: 5000, targetDate: "2027-12-31" });
+    const sooner = await repo.createGoal(A, { platform: null, metric: "monthly_earnings", target: 2000, targetDate: "2027-03-01" });
+    await repo.createGoal(B, { platform: "youtube", metric: "followers", target: 1, targetDate: "2027-01-01" });
+    expect((await repo.listGoals(A)).map((g) => [g.id, g.platform, g.status])).toEqual([
+      [sooner, null, "active"],
+      [later, "tiktok", "active"],
+    ]);
+    await repo.setGoalStatus(A, sooner, "reached");
+    const goals = await repo.listGoals(A);
+    expect(goals.map((g) => g.id)).toEqual([later, sooner]);
+    expect(goals[1].reachedAt).toBeTruthy();
+    await repo.deleteGoal(B, later); // not Bob's
+    expect(await repo.listGoals(A)).toHaveLength(2);
+    await repo.deleteGoal(A, later);
+    expect((await repo.listGoals(A)).map((g) => g.id)).toEqual([sooner]);
+  });
+});

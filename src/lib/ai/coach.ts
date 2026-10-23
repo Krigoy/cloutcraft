@@ -29,6 +29,21 @@ export interface CoachInput {
   creatorNotes?: string;
   /** Previous turns when this is a follow-up. */
   conversation?: ConversationTurn[];
+  /** The creator's declared goals with their current pace. */
+  goals?: CoachGoal[];
+}
+
+export interface CoachGoal {
+  label: string;
+  platform: Platform | null;
+  metric: "followers" | "monthly_earnings";
+  target: number;
+  targetDate: string;
+  current: number;
+  paceMonthly: number | null;
+  requiredMonthly: number | null;
+  projectedDate: string | null;
+  verdict: string;
 }
 
 export interface CoachRunResult {
@@ -62,6 +77,7 @@ Rules:
 - For any follower/subscriber timeline, use the precomputed "followerMilestones" (months to each milestone at 2%, 5% and 10% monthly growth) and say which rate the creator's recent growth resembles. Do not do compounding arithmetic yourself.
 - Every experiment carries "tracking" so the app can score it automatically from synced uploads: the segment that identifies the treatment uploads (platform, kind, publish weekdays 0–6 Sunday first, duration bounds in seconds — null for whatever is not being tested), the metric ("median_views", "median_engagement", "earnings_per_item" or "uploads_per_week" for cadence tests) and the target lift as a fraction (0.2 = +20%). Design experiments so the treatment is identifiable this way (a format, a length band, a weekday, a cadence), not by title or topic, and make the segment match the hypothesis exactly (a "Friday, over 60 s" hypothesis means weekdays [5] and minDurationSec 60 — not the comparison arm).
 - If "conversation" is present, this is a follow-up in an ongoing conversation: the earlier questions, answers and recommendation titles are given. Build on them — answer the new question directly, do not repeat recommendations already given unless you are revising them, and say what changes. If "creatorNotes" is empty on a follow-up, treat it as "update the plan with the latest data".
+- If "goals" is present, these are goals the creator has declared in the app, each with the current value, the recent monthly pace, the monthly rate the deadline would need, and the date the current pace lands on. Treat them as a standing brief: say plainly whether each is realistic, make the plan move them, and quote those numbers rather than recomputing them.
 - If "creatorNotes" is absent, set "answer" to an empty string.
 - Respond with a single JSON object that matches the provided schema exactly.`;
 
@@ -173,6 +189,14 @@ export function buildCoachPayload(input: CoachInput): unknown {
       title: f.title,
       detail: f.detail,
     })),
+    goals: input.goals?.length
+      ? input.goals.map((g) => ({
+          ...g,
+          paceMonthly: g.paceMonthly === null ? null : round(g.paceMonthly, 4),
+          requiredMonthly: g.requiredMonthly === null ? null : round(g.requiredMonthly, 4),
+          projectedDate: g.projectedDate?.slice(0, 10) ?? null,
+        }))
+      : undefined,
     creatorNotes: input.creatorNotes?.trim() || undefined,
     conversation: input.conversation?.length ? input.conversation : undefined,
   };

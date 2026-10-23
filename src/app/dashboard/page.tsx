@@ -5,6 +5,7 @@ import { EarningsTimeline } from "@/components/earnings-timeline";
 import { EmptyState } from "@/components/empty-state";
 import { WindowPicker } from "@/components/filter-links";
 import { FindingCard } from "@/components/finding-card";
+import { GoalsStrip } from "@/components/goals-strip";
 import { Flash } from "@/components/flash";
 import { CountUp } from "@/components/motion/count-up";
 import { Reveal } from "@/components/motion/reveal";
@@ -139,6 +140,8 @@ export default async function DashboardPage({ searchParams }: PageWithSearchPara
           sub="across connected channels"
         />
       </section>
+
+      <GoalsStrip goals={data.goals} reached={data.reachedGoals} platforms={platforms} now={data.now} />
 
       <section className="grid gap-4 lg:grid-cols-3">
         <Card data-reveal className="lg:col-span-2">

@@ -127,6 +127,18 @@ const TABLES = [
     created_at TEXT NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_payouts_ws ON payout_reports (workspace_id, platform, period_start)`,
+  `CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    platform TEXT,
+    metric TEXT NOT NULL,
+    target DOUBLE PRECISION NOT NULL,
+    target_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    reached_at TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_goals_ws ON goals (workspace_id, status, target_date)`,
 ];
 
 /** Additive migrations for existing databases (all IF NOT EXISTS). */
@@ -148,6 +160,7 @@ const TABLE_NAMES = [
   "coach_runs",
   "experiments",
   "payout_reports",
+  "goals",
 ];
 
 export const SCHEMA_SQL: string[] = [

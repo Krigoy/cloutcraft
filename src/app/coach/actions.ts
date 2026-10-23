@@ -48,7 +48,19 @@ export async function runCoachAction(
   }
 
   try {
-    const result = await runCoach({ report: data.report, snapshots: data.snapshots, creatorNotes: notes, conversation });
+    const goals = data.goals.map(({ goal, projection, label }) => ({
+      label,
+      platform: goal.platform,
+      metric: goal.metric,
+      target: goal.target,
+      targetDate: goal.targetDate,
+      current: Math.round(projection.current),
+      paceMonthly: projection.paceMonthly,
+      requiredMonthly: projection.requiredMonthly,
+      projectedDate: projection.projectedDate,
+      verdict: projection.verdict,
+    }));
+    const result = await runCoach({ report: data.report, snapshots: data.snapshots, creatorNotes: notes, conversation, goals });
     const saved = await saveCoachRun(data.workspaceId, {
       model: `${result.provider}/${result.model}`,
       input: result.input,
